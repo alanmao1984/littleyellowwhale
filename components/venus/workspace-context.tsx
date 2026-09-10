@@ -4,7 +4,7 @@ import { createContext, useContext, useState, useEffect, type ReactNode } from '
 import useSWR from 'swr'
 
 export type Locale = 'zh' | 'en'
-export type Section = 'overview' | 'tasks' | 'compute' | 'nodes' | 'earnings' | 'developers' | 'settings'
+export type Section = 'overview' | 'tasks' | 'compute' | 'text-market' | 'video-market' | 'organizations' | 'nodes' | 'earnings' | 'developers' | 'settings'
 export type Modal = 'task' | 'connect' | 'account' | 'help' | 'notifications' | 'install' | null
 export type ServiceStatus = { database: 'connected' | 'unavailable' | 'pending'; authentication: 'ready' | 'pending'; authenticationConfigured?: boolean; checkedAt: string }
 export type SessionUser = { id: string; name: string; email: string }

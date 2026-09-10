@@ -52,7 +52,7 @@ export async function runNode(config: RuntimeConfig, stop: AbortSignal, report: 
     let result: ResultInput
     try {
       if (!localAllows(work) || !await renew() || controller.signal.aborted) throw new Error('未授权执行')
-      const output = work.taskType === 'text' ? await infer(config.adapter, work, controller.signal) : await executeMedia(config.adapter, work, controller.signal)
+      const output = work.taskType === 'text' ? await infer(config.adapter, work, controller.signal) : await executeMedia(config.adapter, work, controller.signal, { platform: platformUrl(config.platform), nodeToken: config.token })
       if (controller.signal.aborted) throw new Error('执行已请求中止')
       result = { attemptId: work.attemptId, fence: work.fence, model: work.model, outcome: 'completed', ...output }
     } catch {

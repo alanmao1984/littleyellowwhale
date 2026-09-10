@@ -4,7 +4,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { z } from 'zod'
 import { type Assignment, type Capability, type imageShotItemSchema } from '../../node-protocol/index.ts'
 
-export const MAX_MEDIA_BYTES = 50_000_000
+export const MAX_MEDIA_BYTES = 250 * 1024 * 1024
 export const MAX_MEDIA_FILES = 4
 const mapping = z.object({ node: z.string().regex(/^[0-9]+$/), key: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/) }).strict()
 export const templateSchema = z.object({

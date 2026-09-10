@@ -25,7 +25,7 @@ export type NodeView = {
 }
 
 export type EnrollmentView = { id: string; platform: string; nodeName: string; expiresAt: string }
-export type ApiTokenView = { id: string; name: string; scope: string; lastUsedAt: string | null; createdAt: string }
+export type ApiTokenView = { id: string; name: string; scope: string; organizationId: string | null; expiresAt: string | null; lastUsedAt: string | null; createdAt: string }
 
 // --- Enrollment (user side) ---------------------------------------------------
 
@@ -173,10 +173,13 @@ export async function setNodeStatus(
 export async function createApiToken(
   userId: string,
   name: string,
+  scope: 'read_draft' | 'market:invoke' = 'read_draft',
+  expiresInDays = 30,
 ): Promise<{ token: string; id: string }> {
   const token = generateSecret('vsk')
   const id = randomUUID()
-  await db.insert(apiToken).values({ id, userId, name: name.trim().slice(0, 60) || 'MCP token', tokenHash: hashToken(token), scope: 'read_draft' })
+  const safeDays = Math.min(365, Math.max(1, Math.trunc(expiresInDays)))
+  await db.insert(apiToken).values({ id, userId, name: name.trim().slice(0, 60) || 'API token', tokenHash: hashToken(token), scope, expiresAt: new Date(Date.now() + safeDays * 24 * 60 * 60_000) })
   return { token, id }
 }
 
@@ -187,7 +190,7 @@ export async function listApiTokens(userId: string): Promise<ApiTokenView[]> {
     .where(and(eq(apiToken.userId, userId), eq(apiToken.revoked, false)))
     .orderBy(desc(apiToken.createdAt))
     .limit(20)
-  return rows.map((row) => ({ id: row.id, name: row.name, scope: row.scope, lastUsedAt: row.lastUsedAt ? row.lastUsedAt.toISOString() : null, createdAt: row.createdAt.toISOString() }))
+  return rows.map((row) => ({ id: row.id, name: row.name, scope: row.scope, organizationId: row.organizationId, expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null, lastUsedAt: row.lastUsedAt ? row.lastUsedAt.toISOString() : null, createdAt: row.createdAt.toISOString() }))
 }
 
 export async function revokeApiToken(userId: string, id: string): Promise<{ ok: boolean }> {
@@ -202,7 +205,7 @@ export async function revokeApiToken(userId: string, id: string): Promise<{ ok: 
 export async function resolveApiToken(token: string): Promise<{ userId: string; scope: string } | null> {
   if (!token.startsWith('vsk_')) return null
   const [row] = await db.select().from(apiToken).where(and(eq(apiToken.tokenHash, hashToken(token)), eq(apiToken.revoked, false))).limit(1)
-  if (!row) return null
-  await db.update(apiToken).set({ lastUsedAt: new Date() }).where(eq(apiToken.id, row.id))
+  if (!row || (row.expiresAt && row.expiresAt.getTime() <= Date.now())) return null
+  await db.update(apiToken).set({ lastUsedAt: new Date() }).where(and(eq(apiToken.id, row.id), eq(apiToken.userId, row.userId)))
   return { userId: row.userId, scope: row.scope }
 }

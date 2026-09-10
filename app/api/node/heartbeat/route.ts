@@ -20,5 +20,5 @@ export async function POST(request: Request) {
   after(() => recoverLeaseWatchers(identity.userId))
   const { allowedCapabilities: _capabilities, ...legacyPolicy } = result.policy
   const declaredCapabilities = input && typeof input === 'object' && 'capabilities' in input
-  return nodeResponse({ ok: true, protocolVersion: 1, ...result, policy: declaredCapabilities ? result.policy : legacyPolicy })
+  return nodeResponse({ ok: true, protocolVersion: declaredCapabilities ? 2 : 1, transports: declaredCapabilities ? ['inline-text', 'private-blob-v1'] : ['inline-text'], ...result, policy: declaredCapabilities ? result.policy : legacyPolicy })
 }

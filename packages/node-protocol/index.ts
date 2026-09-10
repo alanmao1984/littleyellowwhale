@@ -76,6 +76,15 @@ export const imageShotItemSchema = z.object({
   seed: z.number().int().min(0).max(2147483647).optional(), width: z.number().int().min(256).max(2048).default(1024), height: z.number().int().min(256).max(2048).default(1024),
 }).strict()
 
+export const remotePrivateVideoItemSchema = z.object({
+  kind: z.literal('remote_private_media'),
+  assetId: z.string().uuid(),
+  template: z.enum(['compress_mp4', 'resize_720p', 'resize_1080p']),
+  contentType: z.enum(['video/mp4', 'video/quicktime', 'video/webm']),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  byteSize: z.number().int().positive().max(250 * 1024 * 1024),
+}).strict()
+
 export const resultSchema = leaseSchema.extend({
   outcome: z.enum(['completed', 'uncertain']), model: modelSchema,
   output: z.string().max(32000).optional(),

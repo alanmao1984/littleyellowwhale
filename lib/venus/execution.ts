@@ -43,26 +43,26 @@ export async function claimWork(p: NodePrincipal, requestId: string) {
     const [hb] = await tx.select().from(nodeHeartbeat).where(and(eq(nodeHeartbeat.userId, p.userId), eq(nodeHeartbeat.nodeId, p.nodeId))).limit(1)
     if (!hb || Date.now() - hb.lastSeenAt.getTime() >= LEASE_MS) return { assignment: null, reason: 'heartbeat_required' }
     const claimKey = `${p.nodeId}:${requestId}`
-    const [previous] = await tx.select().from(taskItem).where(and(eq(taskItem.userId, p.userId), eq(taskItem.nodeId, p.nodeId), eq(taskItem.claimKey, claimKey))).limit(1)
+    const [previous] = await tx.select().from(taskItem).where(and(eq(taskItem.nodeId, p.nodeId), eq(taskItem.claimKey, claimKey))).limit(1)
     if (previous) {
-      const [tk] = await tx.select().from(task).where(scopedTask(p.userId, previous.taskId)).for('update').limit(1)
-      if (!tk || tk.cancelRequested || previous.status !== 'running' || !previous.leaseExpiresAt || previous.leaseExpiresAt.getTime() <= Date.now() || !canExecute(policy, tk.model!) || !supportsWork(policy.allowedCapabilities, tk.taskType, tk.operation) || !supportsWork(hb.capabilities, tk.taskType, tk.operation)) return { assignment: null, reason: 'claim_no_longer_valid' }
+      const [tk] = await tx.select().from(task).where(scopedTask(previous.userId, previous.taskId)).for('update').limit(1)
+      if (!tk || tk.nodeId !== p.nodeId || tk.cancelRequested || previous.status !== 'running' || !previous.leaseExpiresAt || previous.leaseExpiresAt.getTime() <= Date.now() || !canExecute(policy, tk.model!) || !supportsWork(policy.allowedCapabilities, tk.taskType, tk.operation) || !supportsWork(hb.capabilities, tk.taskType, tk.operation)) return { assignment: null, reason: 'claim_no_longer_valid' }
       return { assignment: assignment(tk, previous), reason: null }
     }
-    const active = await tx.select({ id: taskItem.id }).from(taskItem).where(and(eq(taskItem.userId, p.userId), eq(taskItem.nodeId, p.nodeId), eq(taskItem.status, 'running')))
+    const active = await tx.select({ id: taskItem.id }).from(taskItem).where(and(eq(taskItem.nodeId, p.nodeId), eq(taskItem.status, 'running')))
     if (active.length >= policy.maxConcurrency) return { assignment: null, reason: 'concurrency_limit' }
-    const candidates = await tx.select().from(task).where(and(eq(task.userId, p.userId), eq(task.nodeId, p.nodeId), eq(task.cancelRequested, false), inArray(task.status, ['queued', 'running']))).orderBy(asc(task.createdAt)).limit(100)
+    const candidates = await tx.select().from(task).where(and(eq(task.nodeId, p.nodeId), eq(task.cancelRequested, false), inArray(task.status, ['queued', 'running']))).orderBy(asc(task.createdAt)).limit(100)
     for (const candidate of candidates) {
       if (!candidate.consentedAt || !candidate.model || !canExecute(policy, candidate.model) || !hb.models?.includes(candidate.model) || !supportsWork(policy.allowedCapabilities, candidate.taskType, candidate.operation) || !supportsWork(hb.capabilities, candidate.taskType, candidate.operation)) continue
-      const [tk] = await tx.select().from(task).where(scopedTask(p.userId, candidate.id)).for('update').limit(1)
-      if (tk.cancelRequested || !['queued', 'running'].includes(tk.status)) continue
-      const busy = await tx.select({ id: taskItem.id }).from(taskItem).where(and(scopedItems(p.userId, tk.id), eq(taskItem.status, 'running')))
+      const [tk] = await tx.select().from(task).where(scopedTask(candidate.userId, candidate.id)).for('update').limit(1)
+      if (tk.nodeId !== p.nodeId || tk.cancelRequested || !['queued', 'running'].includes(tk.status)) continue
+      const busy = await tx.select({ id: taskItem.id }).from(taskItem).where(and(scopedItems(tk.userId, tk.id), eq(taskItem.status, 'running')))
       if (busy.length >= tk.concurrency) continue
-      const [item] = await tx.select().from(taskItem).where(and(scopedItems(p.userId, tk.id), eq(taskItem.status, 'pending'))).orderBy(asc(taskItem.idx)).for('update').limit(1)
+      const [item] = await tx.select().from(taskItem).where(and(scopedItems(tk.userId, tk.id), eq(taskItem.status, 'pending'))).orderBy(asc(taskItem.idx)).for('update').limit(1)
       if (!item) continue
       const [claimed] = await tx.update(taskItem).set({ status: 'running', nodeId: p.nodeId, attemptId: randomUUID(), claimKey, fence: item.fence + 1, startedAt: new Date(), leaseExpiresAt: new Date(Date.now() + LEASE_MS) })
-        .where(and(scopedItems(p.userId, tk.id), eq(taskItem.id, item.id), eq(taskItem.status, 'pending'))).returning()
-      await tx.update(task).set({ status: 'running' }).where(scopedTask(p.userId, tk.id))
+        .where(and(scopedItems(tk.userId, tk.id), eq(taskItem.id, item.id), eq(taskItem.status, 'pending'))).returning()
+      await tx.update(task).set({ status: 'running' }).where(scopedTask(tk.userId, tk.id))
       return { assignment: assignment(tk, claimed), reason: null }
     }
     return { assignment: null, reason: 'no_matching_task' }
@@ -72,10 +72,10 @@ export async function claimWork(p: NodePrincipal, requestId: string) {
 async function lockAttempt(tx: Tx, p: NodePrincipal, attemptId: string) {
   const [n] = await tx.select().from(node).where(scopedNode(p)).for('update').limit(1)
   if (!n || n.status === 'revoked') return null
-  const scope = and(eq(taskItem.userId, p.userId), eq(taskItem.nodeId, p.nodeId), eq(taskItem.attemptId, attemptId))
+  const scope = and(eq(taskItem.nodeId, p.nodeId), eq(taskItem.attemptId, attemptId))
   const [found] = await tx.select().from(taskItem).where(scope).limit(1)
   if (!found) return null
-  const [tk] = await tx.select().from(task).where(scopedTask(p.userId, found.taskId)).for('update').limit(1)
+  const [tk] = await tx.select().from(task).where(scopedTask(found.userId, found.taskId)).for('update').limit(1)
   const [item] = await tx.select().from(taskItem).where(scope).for('update').limit(1)
   return tk && item ? { n, tk, item, scope } : null
 }
@@ -86,7 +86,7 @@ export async function renewLease(p: NodePrincipal, attemptId: string, fence: num
     if (!found) return { ok: false as const, error: 'not_found' }
     const { n, tk, item, scope } = found
     if (item.fence !== fence || item.status !== 'running' || !item.leaseExpiresAt || item.leaseExpiresAt.getTime() <= Date.now()) {
-      await expireItems(tx, p.userId, tk.id)
+      await expireItems(tx, tk.userId, tk.id)
       return { ok: false as const, error: 'lease_lost' }
     }
     const policy = readPolicy(n.resourcePolicy)
@@ -109,7 +109,7 @@ export async function completeAttempt(p: NodePrincipal, input: ResultInput) {
     if (item.fence !== input.fence || tk.model !== input.model) return { ok: false as const, error: 'lease_mismatch' }
     if (item.resultHash) return item.resultHash === hash ? { ok: true as const, duplicate: true, status: 'review' } : { ok: false as const, error: 'result_conflict' }
     if (item.status !== 'running' || !item.leaseExpiresAt || item.leaseExpiresAt.getTime() <= Date.now()) {
-      await expireItems(tx, p.userId, tk.id)
+      await expireItems(tx, tk.userId, tk.id)
       return { ok: false as const, error: 'lease_lost' }
     }
     if (input.usage && input.usage.outputTokens > tk.maxOutputTokens) return { ok: false as const, error: 'usage_limit' }
@@ -117,7 +117,7 @@ export async function completeAttempt(p: NodePrincipal, input: ResultInput) {
     // Persist for review; never mint earnings or automatically retry uncertain work.
     await tx.update(taskItem).set({ status: 'review', result: input.outcome === 'completed' ? input.output : null,
       usage: input.usage ?? null, resultMeta: input.resultMeta ?? null, resultHash: hash, errorCode: input.outcome === 'uncertain' ? (input.errorCode ?? 'inference_error') : null, finishedAt: new Date() }).where(scope)
-    await updateSummary(tx, p.userId, tk.id)
+    await updateSummary(tx, tk.userId, tk.id)
     return { ok: true as const, duplicate: false, status: 'review' }
   })
 }

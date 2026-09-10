@@ -1,10 +1,13 @@
 import { spawn } from 'node:child_process'
-import { stat, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+import { stat, rm, mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { MAX_MEDIA_BYTES, MAX_MEDIA_FILES, confinedPath, downloadMedia, outputDirectory, prepareApprovedPrompt, videoPaths, type LocalMediaPolicy } from './media-security.ts'
 import { z } from 'zod'
-import { imageShotItemSchema, modelSchema, videoSegmentItemSchema, videoTranscodeItemSchema, type Assignment } from '../../node-protocol/index.ts'
+import { imageShotItemSchema, modelSchema, remotePrivateVideoItemSchema, videoSegmentItemSchema, videoTranscodeItemSchema, type Assignment } from '../../node-protocol/index.ts'
 
 export type AdapterConfig = { provider: 'ollama' | 'openai' | 'comfyui'; baseUrl: string; ffmpegPath?: string; media?: LocalMediaPolicy }
 export function adapterCapabilities(config: AdapterConfig) {
@@ -149,9 +152,48 @@ async function executeComfy(config: AdapterConfig, work: Assignment, signal: Abo
   } catch (error) { await rm(directory, { recursive: true, force: true }); throw error }
 }
 
-export async function executeMedia(config: AdapterConfig, work: Assignment, signal: AbortSignal) {
+async function authorizeTransfer(platform: string, nodeToken: string, work: Assignment, assetId: string, action: 'download' | 'upload') {
+  const response = await fetch(`${platform}/api/node/media/authorize`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${nodeToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId: work.attemptId, fence: work.fence, assetId, action }) })
+  return z.object({ token: z.string().min(20), maxBytes: z.number().int().positive(), expiresAt: z.string().datetime() }).parse(await boundedJson(response))
+}
+
+async function fileSha256(path: string) {
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(path)) hash.update(chunk)
+  return hash.digest('hex')
+}
+
+export async function executeRemoteVideo(config: AdapterConfig, work: Assignment, signal: AbortSignal, platform: string, nodeToken: string) {
+  const item = remotePrivateVideoItemSchema.parse(JSON.parse(work.input))
+  const directory = await mkdtemp(join(tmpdir(), `venus-${work.attemptId}-`))
+  const extension = item.contentType === 'video/webm' ? 'webm' : item.contentType === 'video/quicktime' ? 'mov' : 'mp4'
+  const inputPath = join(directory, `input.${extension}`); const outputPath = join(directory, 'output.mp4')
+  try {
+    const download = await authorizeTransfer(platform, nodeToken, work, item.assetId, 'download')
+    const response = await fetch(`${platform}/api/node/media/download`, { redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(10 * 60_000)]), headers: { Authorization: `Bearer ${download.token}` } })
+    await downloadMedia(response, inputPath, { remaining: Math.min(download.maxBytes, MAX_MEDIA_BYTES) })
+    if (await fileSha256(inputPath) !== item.sha256) throw new Error('输入媒体摘要不匹配')
+    const scale = item.template === 'resize_720p' ? ['-vf', 'scale=-2:720'] : item.template === 'resize_1080p' ? ['-vf', 'scale=-2:1080'] : []
+    const quality = item.template === 'compress_mp4' ? ['-crf', '28'] : ['-crf', '23']
+    await processRun(config.ffmpegPath || 'ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-n', '-protocol_whitelist', 'file', '-i', inputPath, '-map', '0:v:0?', '-map', '0:a:0?', ...scale, '-c:v', 'libx264', ...quality, '-c:a', 'aac', '-threads', '2', '-movflags', '+faststart', '-fs', String(MAX_MEDIA_BYTES), outputPath], AbortSignal.any([signal, AbortSignal.timeout(20 * 60_000)]))
+    const info = await stat(outputPath); const sha256 = await fileSha256(outputPath)
+    if (!info.size || info.size > MAX_MEDIA_BYTES) throw new Error('媒体输出无效')
+    const upload = await authorizeTransfer(platform, nodeToken, work, item.assetId, 'upload')
+    const body = createReadStream(outputPath)
+    const uploaded = await fetch(`${platform}/api/node/media/upload`, { method: 'PUT', redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(10 * 60_000)]), headers: { Authorization: `Bearer ${upload.token}`, 'Content-Type': 'video/mp4', 'Content-Length': String(info.size), 'X-Content-SHA256': sha256 }, body, duplex: 'half' } as unknown as RequestInit & { duplex: 'half' })
+    const result = z.object({ assetId: z.string().uuid() }).parse(await boundedJson(uploaded))
+    const meta = { kind: 'video', transport: 'private_blob', template: item.template, assetId: result.assetId, bytes: info.size, sha256 }
+    return { output: JSON.stringify(meta), resultMeta: meta, usage: null }
+  } finally { await rm(directory, { recursive: true, force: true }) }
+}
+
+export async function executeMedia(config: AdapterConfig, work: Assignment, signal: AbortSignal, transfer?: { platform: string; nodeToken: string }) {
   signal.throwIfAborted()
   if (!config.media || !config.media.capabilities.some(capability => capability === `${work.taskType}:${work.operation}`)) throw new Error('本次前台会话未授权该媒体能力')
+  if (work.taskType === 'video' && transfer) {
+    const remote = remotePrivateVideoItemSchema.safeParse(JSON.parse(work.input))
+    if (remote.success) return executeRemoteVideo(config, work, signal, transfer.platform, transfer.nodeToken)
+  }
   if (work.taskType === 'video') return executeVideo(config, work, signal)
   if (work.taskType === 'image' && config.provider === 'comfyui') return executeComfy(config, work, signal)
   throw new Error('节点适配器不支持此媒体任务')
