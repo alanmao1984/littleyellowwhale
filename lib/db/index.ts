@@ -8,8 +8,13 @@ function getPool() {
   if (!process.env.DATABASE_URL) throw new Error('Database configuration pending')
   const existing = globalDatabase.venusPool ?? new Pool({
     connectionString: process.env.DATABASE_URL,
-    max: 3, connectionTimeoutMillis: 5000, idleTimeoutMillis: 10000,
+    max: 3,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 5000,
     statement_timeout: 5000,
+    query_timeout: 8000,
+    maxUses: 500,
+    maxLifetimeSeconds: 300,
   })
   globalDatabase.venusPool = existing
   return existing

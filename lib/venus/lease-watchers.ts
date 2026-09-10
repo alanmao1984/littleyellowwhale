@@ -3,8 +3,11 @@ import { pendingWatchers, reconcileUserLeases } from './execution'
 import { watchLease } from '@/workflows/lease-watch'
 import { claimLeaseDispatch, finishLeaseDispatch } from './dispatch'
 import { recoverSettlementWatchers } from './settlement-watchers'
+import { createSingleFlightCooldown } from './single-flight'
 
-export async function recoverLeaseWatchers(userId: string) {
+const recoverWithCooldown = createSingleFlightCooldown<void>(10_000)
+
+async function runLeaseWatcherRecovery(userId: string) {
   await reconcileUserLeases(userId)
   const pending = await pendingWatchers(userId)
   for (const item of pending) {
@@ -22,4 +25,16 @@ export async function recoverLeaseWatchers(userId: string) {
     }
   }
   await recoverSettlementWatchers(userId)
+}
+
+export function recoverLeaseWatchers(userId: string) {
+  return recoverWithCooldown(userId, async () => {
+    try {
+      await runLeaseWatcherRecovery(userId)
+    } catch {
+      // Recovery runs after the response; never leave an unhandled rejection
+      // that can destabilize the Next.js development server.
+      console.warn('Venus watcher recovery deferred')
+    }
+  })
 }

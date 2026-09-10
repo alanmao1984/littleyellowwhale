@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import useSWR from 'swr'
+import { fetchJson, pollingConfig } from '@/lib/venus/request'
 
 export type Locale = 'zh' | 'en'
 export type Section = 'overview' | 'tasks' | 'compute' | 'text-market' | 'video-market' | 'organizations' | 'nodes' | 'earnings' | 'developers' | 'settings'
@@ -20,11 +21,11 @@ export function WorkspaceProvider({ children, initialLocale, user = null }: { ch
   const [locale, updateLocale] = useState<Locale>(initialLocale)
   const [modal, setModal] = useState<Modal>(null)
   const [draft, setDraft] = useState('')
-  const { data: status, error, mutate } = useSWR<ServiceStatus>('/api/status', async (url: string) => {
-    const response = await fetch(url, { cache: 'no-store' })
-    if (!response.ok) throw new Error('status_unavailable')
-    return response.json()
-  }, { revalidateOnFocus: false, dedupingInterval: 30000, errorRetryCount: 1 })
+  const { data: status, error, mutate } = useSWR<ServiceStatus>('/api/status', fetchJson, {
+    ...pollingConfig,
+    revalidateOnFocus: false,
+    dedupingInterval: 30000,
+  })
   function setLocale(next: Locale) {
     updateLocale(next)
     document.cookie = `venus-locale=${next}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`

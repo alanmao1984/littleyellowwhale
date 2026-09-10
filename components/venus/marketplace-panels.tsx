@@ -18,8 +18,9 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PageHeading } from './workspace'
 import { useWorkspace } from './workspace-context'
 import { useNodes } from '@/lib/venus/use-workspace-data'
+import { fetchJson, pollingConfig } from '@/lib/venus/request'
 
-async function fetcher<T>(url: string): Promise<T> { const response = await fetch(url, { cache: 'no-store' }); if (!response.ok) throw new Error('request_failed'); return response.json() as Promise<T> }
+const fetcher = fetchJson
 
 type CatalogModel = { id: string; context_limit: number; pricing: { input_per_1k: string; output_per_1k: string; currency: string } }
 type Offering = { id: string; modelAlias: string; providerModel: string; status: string; inputUnitPrice: string; outputUnitPrice: string }
@@ -33,7 +34,7 @@ function SignInEmpty({ title, description, icon: Icon }: { title: string; descri
 export function TextMarketPanel() {
   const { user } = useWorkspace()
   const { nodes } = useNodes(!!user)
-  const { data, isLoading, mutate } = useSWR<MarketData>(user ? '/api/v1/offerings' : null, fetcher, { refreshInterval: 10000 })
+  const { data, isLoading, mutate } = useSWR<MarketData>(user ? '/api/v1/offerings' : null, fetcher, { ...pollingConfig, refreshInterval: 10000 })
   const availableNodes = (nodes ?? []).filter(node => node.online && node.capabilities.includes('text:infer') && node.models.length)
   const [nodeId, setNodeId] = useState<string | null>(null)
   const selectedNode = availableNodes.find(node => node.id === nodeId) ?? availableNodes[0]
@@ -79,7 +80,7 @@ async function sha256(file: File) { const digest = await crypto.subtle.digest('S
 export function VideoMarketPanel() {
   const { user } = useWorkspace()
   const { nodes } = useNodes(!!user)
-  const { data, mutate } = useSWR<{ assets: Asset[] }>(user ? '/api/media/tasks' : null, fetcher, { refreshInterval: 5000 })
+  const { data, mutate } = useSWR<{ assets: Asset[] }>(user ? '/api/media/tasks' : null, fetcher, { ...pollingConfig, refreshInterval: 5000 })
   const videoNodes = (nodes ?? []).filter(item => item.online && item.capabilities.includes('video:transcode'))
   const [file, setFile] = useState<File | null>(null); const [progress, setProgress] = useState(0); const [busy, setBusy] = useState(false)
   const [template, setTemplate] = useState('compress_mp4'); const [nodeId, setNodeId] = useState<string | null>(null)
@@ -114,9 +115,9 @@ type OrganizationListItem = { id: string; name: string; slug: string; type: stri
 type OrganizationWorkspace = { organization: OrganizationListItem; currentRole: string; members: Array<{ id: string; role: string; status: string }>; departments: Array<{ id: string; name: string }>; costCenters: Array<{ id: string; code: string; name: string }>; quotas: Array<{ id: string; kind: string; limitValue: string; reservedValue: string; usedValue: string }>; audits: Array<{ id: string; action: string; targetType: string; createdAt: string }> }
 
 export function OrganizationComputePanel() {
-  const { user } = useWorkspace(); const { data, mutate } = useSWR<{ organizations: OrganizationListItem[] }>(user ? '/api/v1/organizations' : null, fetcher)
+  const { user } = useWorkspace(); const { data, mutate } = useSWR<{ organizations: OrganizationListItem[] }>(user ? '/api/v1/organizations' : null, fetcher, pollingConfig)
   const [selectedId, setSelectedId] = useState<string | null>(null); const activeId = selectedId ?? data?.organizations[0]?.id ?? null
-  const { data: workspace, mutate: mutateWorkspace } = useSWR<OrganizationWorkspace>(activeId ? `/api/v1/organizations/${activeId}` : null, fetcher)
+  const { data: workspace, mutate: mutateWorkspace } = useSWR<OrganizationWorkspace>(activeId ? `/api/v1/organizations/${activeId}` : null, fetcher, pollingConfig)
   const [name, setName] = useState(''); const [type, setType] = useState('enterprise'); const [departmentName, setDepartmentName] = useState(''); const [inviteEmail, setInviteEmail] = useState(''); const [inviteToken, setInviteToken] = useState(''); const [busy, setBusy] = useState(false)
   async function create() { if (!name.trim()) return; setBusy(true); try { const response = await fetch('/api/v1/organizations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, type }) }); const result = await response.json(); if (!response.ok || !result.ok) throw new Error(); setName(''); setSelectedId(result.organizationId); await mutate(); toast.success('组织与 Owner 成员关系已创建。') } catch { toast.error('创建组织失败。') } finally { setBusy(false) } }
   async function addDepartment() { if (!activeId || !departmentName.trim()) return; setBusy(true); try { const response = await fetch(`/api/v1/organizations/${activeId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'department', name: departmentName, parentId: null }) }); if (!response.ok) throw new Error(); setDepartmentName(''); void mutateWorkspace(); toast.success('部门已创建并写入审计。') } catch { toast.error('只有 Owner / Admin 可以创建部门。') } finally { setBusy(false) } }

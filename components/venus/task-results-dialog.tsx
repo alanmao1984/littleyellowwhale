@@ -11,6 +11,7 @@ import { Field, FieldLabel, FieldDescription } from '@/components/ui/field'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { settleTask, reviewTaskItem } from '@/app/actions/tasks'
 import { useWorkspace } from './workspace-context'
+import { fetchJson, pollingConfig } from '@/lib/venus/request'
 import type { getTaskResults } from '@/lib/venus/execution'
 
 type Results = NonNullable<Awaited<ReturnType<typeof getTaskResults>>>
@@ -53,11 +54,10 @@ export function TaskResultsDialog({ taskId }: { taskId: string }) {
   const [settling, setSettling] = useState(false)
   const [confirmation, setConfirmation] = useState<'all' | 'reviewed' | null>(null)
   const url = `/api/v1/tasks/${taskId}/results`
-  const { data, error, isLoading, mutate: refresh } = useSWR<Results>(open ? url : null, async requestUrl => {
-    const response = await fetch(requestUrl, { cache: 'no-store' })
-    if (!response.ok) throw new Error('request_failed')
-    return response.json()
-  }, { refreshInterval: open ? 5000 : 0 })
+  const { data, error, isLoading, mutate: refresh } = useSWR<Results>(open ? url : null, fetchJson, {
+    ...pollingConfig,
+    refreshInterval: open ? 5000 : 0,
+  })
   const count = (status: string) => data?.items.filter(item => item.status === status).length ?? 0
   const terminal = !!data && data.settlement === 'unverified' && data.items.length > 0 && data.items.every(item => ['review', 'cancelled'].includes(item.status))
   const reviewed = terminal && data.items.every(item => item.status === 'cancelled' || !!item.reviewDecision)
