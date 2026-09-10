@@ -1,0 +1,82 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@theme inline {
+  --font-sans: var(--font-geist), 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--background);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--secondary);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--primary);
+  --color-sidebar: var(--card);
+  --color-sidebar-foreground: var(--foreground);
+  --color-sidebar-accent: var(--secondary);
+  --color-sidebar-accent-foreground: var(--foreground);
+  --color-sidebar-border: var(--border);
+  --radius-sm: .375rem;
+  --radius-md: .5rem;
+  --radius-lg: .75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+}
+
+:root {
+  color-scheme: light;
+  --background: #f7f8fa;
+  --card: #ffffff;
+  --foreground: #252833;
+  --muted-foreground: #737883;
+  --primary: #f2c43d;
+  --secondary: color-mix(in srgb, var(--primary) 16%, var(--card));
+  --border: color-mix(in srgb, var(--foreground) 9%, var(--card));
+  --input: color-mix(in srgb, var(--foreground) 15%, var(--card));
+  --radius: .75rem;
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground; }
+  button:not(:disabled), [role='button']:not(:disabled), a { cursor: pointer; }
+  button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+  ::selection { background: var(--secondary); color: var(--foreground); }
+}
+
+@layer components {
+  .panel { @apply rounded-xl border border-border bg-card text-card-foreground; }
+  .nav-item { @apply flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground; }
+  .nav-item[data-active='true'] { @apply bg-secondary font-medium text-foreground; }
+  .section-heading { @apply text-base font-semibold tracking-tight; }
+  .eyebrow { @apply text-sm font-medium tracking-wide text-muted-foreground; }
+  .content-enter { animation: content-enter 350ms ease-out both; }
+  [data-slot='badge'] { font-size: .875rem; height: 1.625rem; }
+  [data-slot='card'] { box-shadow: none; border: 1px solid var(--border); }
+  [data-slot='dialog-content'] { max-height: calc(100dvh - 2rem); overflow-y: auto; }
+  [data-slot='dialog-overlay'] { background: color-mix(in srgb, var(--foreground) 24%, transparent); }
+}
+
+@keyframes content-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (width < 80rem) {
+  html { scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

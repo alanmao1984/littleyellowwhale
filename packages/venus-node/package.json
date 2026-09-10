@@ -1,0 +1,9 @@
+{
+  "name": "@venus/foreground-node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": { "start": "node --experimental-strip-types src/cli.ts" },
+  "dependencies": { "zod": "^4.6.1" }
+}
