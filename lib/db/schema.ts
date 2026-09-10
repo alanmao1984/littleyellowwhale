@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, numeric, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
+import { bigint, boolean, integer, jsonb, numeric, pgTable, text, timestamp } from 'drizzle-orm/pg-core'
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
@@ -97,6 +97,12 @@ export const taskItem = pgTable('task_item', {
   errorCode: text('errorCode'),
   resultHash: text('resultHash'),
   watcherRunId: text('watcherRunId'),
+  watcherClaimId: text('watcherClaimId'),
+  watcherClaimUntil: timestamp('watcherClaimUntil', { withTimezone: true }),
+  reviewDecision: text('reviewDecision'),
+  reviewedBy: text('reviewedBy'),
+  reviewedAt: timestamp('reviewedAt', { withTimezone: true }),
+  reviewReason: text('reviewReason'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
 })
 
@@ -166,7 +172,35 @@ export const nodeHeartbeat = pgTable('node_heartbeat', {
   cpu: numeric('cpu', { precision: 5, scale: 2 }),
   vram: integer('vram'),
   models: jsonb('models').$type<string[]>(),
+  capabilities: jsonb('capabilities').$type<import('../../packages/node-protocol').Capability[]>().notNull().default(['text:infer']),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+})
+
+export const taskSettlement = pgTable('task_settlement', {
+  id: text('id').primaryKey(),
+  taskId: text('taskId').notNull().unique(),
+  userId: text('userId').notNull(),
+  currency: text('currency').notNull().default('VTEST'),
+  originalAmount: numeric('originalAmount', { precision: 18, scale: 4 }).notNull(),
+  acceptedAmount: numeric('acceptedAmount', { precision: 18, scale: 4 }).notNull(),
+  refundedAmount: numeric('refundedAmount', { precision: 18, scale: 4 }).notNull(),
+  providerAmount: numeric('providerAmount', { precision: 18, scale: 4 }).notNull(),
+  brokerAmount: numeric('brokerAmount', { precision: 18, scale: 4 }).notNull(),
+  platformAmount: numeric('platformAmount', { precision: 18, scale: 4 }).notNull(),
+  status: text('status').notNull().default('escrowed'),
+  settledAt: timestamp('settledAt', { withTimezone: true }).notNull().defaultNow(),
+  releaseAt: timestamp('releaseAt', { withTimezone: true }).notNull(),
+  releasedAt: timestamp('releasedAt', { withTimezone: true }),
+  releaseRunId: text('releaseRunId'),
+  releaseClaimId: text('releaseClaimId'),
+  releaseClaimUntil: timestamp('releaseClaimUntil', { withTimezone: true }),
+})
+
+export const rateLimit = pgTable('rate_limit', {
+  id: text('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  count: integer('count').notNull(),
+  lastRequest: bigint('lastRequest', { mode: 'number' }).notNull(),
 })
 
 export const apiToken = pgTable('api_token', {

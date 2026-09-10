@@ -3,12 +3,13 @@
 import { Field, FieldGroup, FieldLabel, FieldDescription } from '@/components/ui/field'
 import { useNodes } from '@/lib/venus/use-workspace-data'
 import { useWorkspace } from './workspace-context'
+import { supportsWork } from '@/packages/node-protocol'
 
 export type ExecutionChoice = { nodeId: string; model: string; consent: boolean }
-export function ExecutionConsent({ value, onChange }: { value: ExecutionChoice; onChange: (value: ExecutionChoice) => void }) {
+export function ExecutionConsent({ value, onChange, taskType, operation }: { value: ExecutionChoice; onChange: (value: ExecutionChoice) => void; taskType: string; operation: string }) {
   const { user, t } = useWorkspace()
   const { nodes, nodesLoading, nodesError } = useNodes(!!user)
-  const eligible = (nodes ?? []).filter(n => n.status !== 'revoked' && n.policy.enabled)
+  const eligible = (nodes ?? []).filter(n => n.status !== 'revoked' && n.policy.enabled && supportsWork(n.capabilities, taskType, operation) && supportsWork(n.policy.allowedCapabilities, taskType, operation))
   const selected = eligible.find(n => n.id === value.nodeId)
   const models = selected?.policy.allowedModels.filter(m => selected.models.includes(m)) ?? []
   const selectClass = 'h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-ring'

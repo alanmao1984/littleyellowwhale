@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
-    "test:integration": "node --env-file-if-exists=.env.development.local --import tsx --test tests/execution.integration.mts"
+    "test:integration": "node --env-file-if-exists=.env.development.local --import tsx --test tests/*.integration.mts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

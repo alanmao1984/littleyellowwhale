@@ -1,7 +1,7 @@
 import { cookies, headers } from 'next/headers'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { auth } from '@/lib/auth'
+import { auth, authFormConfig } from '@/lib/auth'
 import { AuthForm } from '@/components/venus/auth-form'
 
 export default async function SignInPage() {
@@ -22,7 +22,7 @@ export default async function SignInPage() {
           <p className="pt-2 pb-6 text-sm leading-relaxed text-muted-foreground text-pretty">
             {t('管理批量任务、算力节点与测试收益账本。', 'Manage batch tasks, compute nodes, and your test ledger.')}
           </p>
-          <AuthForm mode="sign-in" locale={locale} />
+          <AuthForm mode="sign-in" locale={locale} config={authFormConfig} />
         </div>
       </div>
     </main>

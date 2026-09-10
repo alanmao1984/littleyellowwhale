@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { resolveApiToken } from '@/lib/venus/nodes'
 import { listNodes } from '@/lib/venus/nodes'
-import { getWallet } from '@/lib/venus/ledger'
+import { readWallet } from '@/lib/venus/ledger'
+import { readLimitedJson } from '@/lib/venus/node-http'
 import { prepareTaskDraft } from '@/lib/venus/task-draft'
 import { UNIT_PRICE, formatDisplay, multiplyStr } from '@/lib/venus/money'
 
@@ -59,13 +60,13 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
   if (name === 'venus_discover_capabilities') {
     const nodes = (await listNodes(userId)).filter((n) => n.online)
     return toolText({
-      nodes: nodes.map((n) => ({ id: n.id, name: n.name, platform: n.platform, models: n.models })),
+      nodes: nodes.map((n) => ({ id: n.id, name: n.name, platform: n.platform, models: n.models, capabilities: n.capabilities.filter(capability => n.policy.enabled && n.policy.allowedCapabilities.includes(capability)) })),
       note: nodes.length === 0 ? 'No online, verified nodes yet. Capabilities appear only after a node connects.' : undefined,
     })
   }
   if (name === 'venus_get_test_billing') {
-    const wallet = await getWallet(userId)
-    return toolText({ ...wallet, withdrawable: false, note: 'Test ledger only. Funds cannot be withdrawn.' })
+    const wallet = await readWallet(userId)
+    return toolText({ initialized: wallet !== null, wallet, withdrawable: false, note: '只读 VTEST 测试账本，不创建钱包、不解冻或移动资金。' })
   }
   if (name === 'venus_prepare_task_draft') {
     const prepared = prepareTaskDraft({
@@ -92,15 +93,18 @@ async function callTool(name: string, args: Record<string, unknown>, userId: str
 export async function POST(request: Request) {
   const token = bearer(request)
   const auth = token ? await resolveApiToken(token) : null
-  if (!auth) return rpcError(null, -32001, 'Unauthorized', 401)
+  if (!auth || auth.scope !== 'read_draft') return rpcError(null, -32001, 'Unauthorized', 401)
 
   let body: { id?: unknown; method?: string; params?: Record<string, unknown> }
   try {
-    body = await request.json()
+    const input = await readLimitedJson(request, 150000)
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid_request')
+    body = input as typeof body
   } catch {
     return rpcError(null, -32700, 'Parse error', 400)
   }
   const { id = null, method, params = {} } = body
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return rpcError(id, -32602, 'Invalid params', 400)
 
   if (method === 'initialize') {
     return rpc(id, {
@@ -113,6 +117,7 @@ export async function POST(request: Request) {
   if (method === 'tools/call') {
     const name = String((params as Record<string, unknown>).name ?? '')
     const args = ((params as Record<string, unknown>).arguments as Record<string, unknown>) ?? {}
+    if (typeof args !== 'object' || Array.isArray(args)) return rpcError(id, -32602, 'Invalid arguments', 400)
     if (!TOOLS.some((tool) => tool.name === name)) return rpcError(id, -32602, `Unknown tool: ${name}`)
     try {
       const result = await callTool(name, args, auth.userId)

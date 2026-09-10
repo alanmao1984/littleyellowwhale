@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { z } from 'zod'
 import { assignmentSchema, canExecute, resourcePolicySchema, type Assignment, type ResourcePolicy, type ResultInput } from '../../node-protocol/index.ts'
-import { boundedJson, detectModels, executeMedia, infer, type AdapterConfig } from './adapters.ts'
+import { adapterCapabilities, boundedJson, detectModels, executeMedia, infer, type AdapterConfig } from './adapters.ts'
 
 export function platformUrl(value: string) {
   const url = new URL(value)
@@ -15,6 +15,13 @@ export async function platformRequest(base: string, path: string, token: string 
   if (!response.ok) throw new Error(`平台拒绝请求 (${response.status})`)
   return boundedJson(response)
 }
+export async function retryClaim(call: () => Promise<unknown>, stop: AbortSignal) {
+  for (let attempt = 0; ; attempt++) {
+    stop.throwIfAborted()
+    try { return z.object({ assignment: assignmentSchema.nullable() }).parse(await call()) }
+    catch (error) { if (attempt >= 2) throw error; await delay(1000, undefined, { signal: stop }) }
+  }
+}
 export type RuntimeConfig = { platform: string; token: string; adapter: AdapterConfig; allowedModels: string[]; maxConcurrency: number }
 export async function runNode(config: RuntimeConfig, stop: AbortSignal, report: (message: string) => void = console.log) {
   const jobs = new Map<string, { promise: Promise<void>; controller: AbortController }>()
@@ -23,7 +30,7 @@ export async function runNode(config: RuntimeConfig, stop: AbortSignal, report: 
   let accepting = false
   let heartbeatAt = 0
   const call = (path: string, payload: unknown) => platformRequest(config.platform, path, config.token, payload)
-  const localAllows = (work: Assignment) => config.allowedModels.includes(work.model) && available.includes(work.model) && policy && canExecute(policy, work.model)
+  const localAllows = (work: Assignment) => config.allowedModels.includes(work.model) && available.includes(work.model) && policy && canExecute(policy, work.model) && adapterCapabilities(config.adapter).some(capability => capability === `${work.taskType}:${work.operation}`) && policy.allowedCapabilities.some(capability => capability === `${work.taskType}:${work.operation}`)
   async function execute(work: Assignment, controller: AbortController) {
     let done = false
     let reason: ResultInput['errorCode'] = work.taskType === 'text' ? 'inference_error' : 'media_error'
@@ -65,15 +72,16 @@ export async function runNode(config: RuntimeConfig, stop: AbortSignal, report: 
       try {
         if (Date.now() - heartbeatAt >= 15000) {
           available = (await detectModels(config.adapter)).filter(m => config.allowedModels.includes(m)).slice(0, 32)
-          const heartbeat = z.object({ status: z.string(), policy: resourcePolicySchema }).parse(await call('/api/node/heartbeat', { models: available }))
+          const heartbeat = z.object({ status: z.string(), policy: resourcePolicySchema }).parse(await call('/api/node/heartbeat', { models: available, capabilities: adapterCapabilities(config.adapter) }))
           policy = heartbeat.policy; accepting = heartbeat.status === 'enrolled'; heartbeatAt = Date.now()
           for (const job of jobs.values()) if (!accepting || !policy.enabled) job.controller.abort()
         }
         if (accepting && policy && jobs.size < Math.min(config.maxConcurrency, policy.maxConcurrency) && available.some(m => canExecute(policy!, m))) {
           const requestId = randomUUID()
-          const envelope = z.object({ assignment: assignmentSchema.nullable() }).parse(await call('/api/node/claim', { requestId }))
+          const envelope = await retryClaim(() => call('/api/node/claim', { requestId }), stop)
           if (envelope.assignment) {
             const work = envelope.assignment
+            if (jobs.has(work.attemptId)) continue
             const controller = new AbortController()
             const promise = execute(work, controller).finally(() => jobs.delete(work.attemptId))
             jobs.set(work.attemptId, { promise, controller })

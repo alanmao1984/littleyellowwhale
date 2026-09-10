@@ -1,4 +1,6 @@
 import { betterAuth } from 'better-auth'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { CAPTCHA_ENDPOINTS, captchaProtectedPath, resolveCaptchaConfig } from '@/lib/venus/auth-config'
 import { nextCookies } from 'better-auth/next-js'
 import { captcha, emailOTP } from 'better-auth/plugins'
 import { pool } from '@/lib/db'
@@ -8,10 +10,15 @@ const googleClientId = process.env.GOOGLE_CLIENT_ID
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET
 const githubClientId = process.env.GITHUB_CLIENT_ID
 const githubClientSecret = process.env.GITHUB_CLIENT_SECRET
-const turnstileSecretKey =
-  process.env.NODE_ENV === 'production'
-    ? process.env.TURNSTILE_SECRET_KEY
-    : '1x0000000000000000000000000000000AA'
+const captchaConfig = resolveCaptchaConfig(process.env)
+export const authFormConfig = {
+  captcha: { ready: captchaConfig.ready, siteKey: captchaConfig.siteKey, testing: captchaConfig.testing },
+  emailReady: !!(process.env.RESEND_API_KEY && process.env.RESEND_EMAIL_DOMAIN),
+  socialProviders: [
+    ...(googleClientId && googleClientSecret ? ['google' as const] : []),
+    ...(githubClientId && githubClientSecret ? ['github' as const] : []),
+  ],
+}
 
 const socialProviders = {
   ...(googleClientId && googleClientSecret
@@ -33,26 +40,22 @@ const plugins = [
       await sendOtpEmail({ to: email, otp, type })
     },
   }),
-  ...(turnstileSecretKey
-    ? [
-        captcha({
-          provider: 'cloudflare-turnstile' as const,
-          secretKey: turnstileSecretKey,
-          endpoints: [
-            '/sign-in/email',
-            '/sign-up/email',
-            '/request-password-reset',
-            '/email-otp/send-verification-otp',
-            '/sign-in/email-otp',
-          ],
-        }),
-      ]
-    : []),
+  captcha({
+    provider: 'cloudflare-turnstile',
+    secretKey: captchaConfig.secretKey,
+    endpoints: CAPTCHA_ENDPOINTS,
+  }),
   nextCookies(),
 ]
 
 export const auth = betterAuth({
   database: pool,
+  rateLimit: { enabled: true, storage: 'database', modelName: 'rate_limit', window: 60, max: 60,
+    customRules: { '/sign-in/email': { window: 60, max: 5 }, '/sign-up/email': { window: 60, max: 3 }, '/sign-in/email-otp': { window: 60, max: 5 }, '/email-otp/*': { window: 60, max: 3 } },
+  },
+  hooks: { before: createAuthMiddleware(async ctx => {
+    if (captchaProtectedPath(ctx.path) && !captchaConfig.ready) throw new APIError('SERVICE_UNAVAILABLE', { message: '认证暂不可用，请稍后再试。' })
+  }) },
   baseURL:
     process.env.BETTER_AUTH_URL ??
     (process.env.VERCEL_PROJECT_PRODUCTION_URL

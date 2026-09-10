@@ -19,7 +19,7 @@ type CaptchaRequestOptions = {
   headers: { 'x-captcha-response': string }
 }
 
-export function AuthForm({ mode, locale }: { mode: Mode; locale: Locale }) {
+export function AuthForm({ mode, locale, config }: { mode: Mode; locale: Locale; config: { captcha: { ready: boolean; siteKey: string | null; testing: boolean }; emailReady: boolean; socialProviders: SocialProvider[] } }) {
   const t = (zh: string, en: string) => (locale === 'zh' ? zh : en)
   const router = useRouter()
   const [name, setName] = useState('')
@@ -35,7 +35,7 @@ export function AuthForm({ mode, locale }: { mode: Mode; locale: Locale }) {
   const [notice, setNotice] = useState('')
   const [pending, setPending] = useState(false)
 
-  const captchaRequired = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY)
+  const authUnavailable = !config.captcha.ready || (method === 'otp' && !config.emailReady)
   const captchaOptions = useCallback((): CaptchaRequestOptions => ({
     headers: { 'x-captcha-response': captchaToken },
   }), [captchaToken])
@@ -54,7 +54,8 @@ export function AuthForm({ mode, locale }: { mode: Mode; locale: Locale }) {
   }
 
   function validateCaptcha() {
-    if (!captchaRequired || captchaToken) return true
+    if (authUnavailable) { setError(t('认证暂不可用，请稍后重试。', 'Authentication is temporarily unavailable.')); return false }
+    if (captchaToken) return true
     setError(t('请先完成 Cloudflare 人机验证。', 'Complete the Cloudflare human check first.'))
     return false
   }
@@ -200,14 +201,9 @@ export function AuthForm({ mode, locale }: { mode: Mode; locale: Locale }) {
         </button>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        <Button type="button" variant="outline" disabled={pending} onClick={() => signInWithSocial('google')}>
-          <span aria-hidden="true" className="font-semibold">G</span> Google
-        </Button>
-        <Button type="button" variant="outline" disabled={pending} onClick={() => signInWithSocial('github')}>
-          <span aria-hidden="true" className="font-semibold">GH</span> GitHub
-        </Button>
-      </div>
+      {config.socialProviders.length > 0 && <div className="grid gap-2 sm:grid-cols-2">
+        {config.socialProviders.map(provider => <Button key={provider} type="button" variant="outline" disabled={pending} onClick={() => signInWithSocial(provider)}>{provider === 'google' ? 'Google' : 'GitHub'}</Button>)}
+      </div>}
 
       <div className="flex items-center gap-3 text-xs uppercase tracking-[0.16em] text-muted-foreground">
         <span className="h-px flex-1 bg-border" />
@@ -238,7 +234,7 @@ export function AuthForm({ mode, locale }: { mode: Mode; locale: Locale }) {
               <FieldLabel htmlFor="auth-otp">{t('邮箱验证码', 'Email verification code')}</FieldLabel>
               <div className="flex gap-2">
                 <Input id="auth-otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required={otpSent} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder={t('6 位验证码', '6-digit code')} autoComplete="one-time-code" />
-                <Button type="button" variant="outline" disabled={pending || resendCooldown > 0} onClick={sendOtp}>
+                <Button type="button" variant="outline" disabled={pending || resendCooldown > 0 || authUnavailable || !captchaToken} onClick={sendOtp}>
                   {resendCooldown > 0 ? `${resendCooldown}s` : t('发送', 'Send')}
                 </Button>
               </div>
@@ -247,8 +243,9 @@ export function AuthForm({ mode, locale }: { mode: Mode; locale: Locale }) {
           )}
           {error && <FieldError>{error}</FieldError>}
           {notice && <p className="text-sm text-primary" role="status">{notice}</p>}
-          <TurnstileWidget locale={locale} onToken={setCaptchaToken} resetKey={captchaResetKey} />
-          <Button type="submit" variant="strong" disabled={pending}>
+          {method === 'otp' && !config.emailReady && <FieldError>{t('邮件服务尚不可用。', 'Email service is unavailable.')}</FieldError>}
+          <TurnstileWidget locale={locale} onToken={setCaptchaToken} resetKey={captchaResetKey} siteKey={config.captcha.siteKey} testing={config.captcha.testing} />
+          <Button type="submit" variant="strong" disabled={pending || authUnavailable || !captchaToken}>
             {pending ? t('处理中…', 'Working…') : mode === 'sign-up' ? (method === 'otp' ? t('验证码注册', 'Sign up with code') : t('创建账户', 'Create account')) : method === 'otp' ? t('验证码登录', 'Sign in with code') : t('登录', 'Sign in')}
             <ArrowRight data-icon="inline-end" />
           </Button>

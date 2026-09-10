@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, asc, eq, inArray, lte, isNull } from 'drizzle-orm'
+import { and, asc, eq, inArray, lte, isNull, or } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { node, nodeHeartbeat, task, taskItem, wallet, ledgerEntry } from '@/lib/db/schema'
-import { addStr, multiplyStr, subStr } from './money'
-import { canExecute, readPolicy, LEASE_MS, MAX_ATTEMPT_MS, type NodePrincipal, type ResultInput, type Assignment } from '@/packages/node-protocol'
+import { node, nodeHeartbeat, task, taskItem, taskSettlement, wallet, ledgerEntry } from '@/lib/db/schema'
+import { addStr, gte, multiplyStr, subStr } from './money'
+import { canExecute, supportsWork, readPolicy, LEASE_MS, MAX_ATTEMPT_MS, type NodePrincipal, type ResultInput, type Assignment } from '@/packages/node-protocol'
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type Item = typeof taskItem.$inferSelect
@@ -46,14 +46,14 @@ export async function claimWork(p: NodePrincipal, requestId: string) {
     const [previous] = await tx.select().from(taskItem).where(and(eq(taskItem.userId, p.userId), eq(taskItem.nodeId, p.nodeId), eq(taskItem.claimKey, claimKey))).limit(1)
     if (previous) {
       const [tk] = await tx.select().from(task).where(scopedTask(p.userId, previous.taskId)).for('update').limit(1)
-      if (!tk || tk.cancelRequested || previous.status !== 'running' || !previous.leaseExpiresAt || previous.leaseExpiresAt.getTime() <= Date.now() || !canExecute(policy, tk.model!)) return { assignment: null, reason: 'claim_no_longer_valid' }
+      if (!tk || tk.cancelRequested || previous.status !== 'running' || !previous.leaseExpiresAt || previous.leaseExpiresAt.getTime() <= Date.now() || !canExecute(policy, tk.model!) || !supportsWork(policy.allowedCapabilities, tk.taskType, tk.operation) || !supportsWork(hb.capabilities, tk.taskType, tk.operation)) return { assignment: null, reason: 'claim_no_longer_valid' }
       return { assignment: assignment(tk, previous), reason: null }
     }
     const active = await tx.select({ id: taskItem.id }).from(taskItem).where(and(eq(taskItem.userId, p.userId), eq(taskItem.nodeId, p.nodeId), eq(taskItem.status, 'running')))
     if (active.length >= policy.maxConcurrency) return { assignment: null, reason: 'concurrency_limit' }
     const candidates = await tx.select().from(task).where(and(eq(task.userId, p.userId), eq(task.nodeId, p.nodeId), eq(task.cancelRequested, false), inArray(task.status, ['queued', 'running']))).orderBy(asc(task.createdAt)).limit(100)
     for (const candidate of candidates) {
-      if (!candidate.consentedAt || !candidate.model || !canExecute(policy, candidate.model) || !hb.models?.includes(candidate.model)) continue
+      if (!candidate.consentedAt || !candidate.model || !canExecute(policy, candidate.model) || !hb.models?.includes(candidate.model) || !supportsWork(policy.allowedCapabilities, candidate.taskType, candidate.operation) || !supportsWork(hb.capabilities, candidate.taskType, candidate.operation)) continue
       const [tk] = await tx.select().from(task).where(scopedTask(p.userId, candidate.id)).for('update').limit(1)
       if (tk.cancelRequested || !['queued', 'running'].includes(tk.status)) continue
       const busy = await tx.select({ id: taskItem.id }).from(taskItem).where(and(scopedItems(p.userId, tk.id), eq(taskItem.status, 'running')))
@@ -89,7 +89,8 @@ export async function renewLease(p: NodePrincipal, attemptId: string, fence: num
       await expireItems(tx, p.userId, tk.id)
       return { ok: false as const, error: 'lease_lost' }
     }
-    const cancel = tk.cancelRequested || n.status !== 'enrolled' || !canExecute(readPolicy(n.resourcePolicy), tk.model!)
+    const policy = readPolicy(n.resourcePolicy)
+    const cancel = tk.cancelRequested || n.status !== 'enrolled' || !canExecute(policy, tk.model!) || !supportsWork(policy.allowedCapabilities, tk.taskType, tk.operation)
     const cap = item.startedAt!.getTime() + MAX_ATTEMPT_MS
     if (cancel || cap <= Date.now()) return { ok: true as const, cancelRequested: true, leaseExpiresAt: item.leaseExpiresAt.toISOString() }
     const expiresAt = new Date(Math.min(Date.now() + LEASE_MS, cap))
@@ -125,11 +126,13 @@ export async function cancelExecution(userId: string, taskId: string) {
   return db.transaction(async tx => {
     const [tk] = await tx.select().from(task).where(scopedTask(userId, taskId)).for('update').limit(1)
     if (!tk) return { ok: false as const, error: 'not_found' as const }
+    if (tk.settlementStatus === 'settled') return { ok: false as const, error: 'not_cancellable' as const }
     if (tk.cancelRequested || tk.status === 'cancelled') return { ok: true as const, released: '0.0000' }
-    const cancelled = await tx.update(taskItem).set({ status: 'cancelled' }).where(and(scopedItems(userId, taskId), eq(taskItem.status, 'pending'))).returning({ id: taskItem.id, billingUnits: taskItem.billingUnits })
+    const cancelled = await tx.update(taskItem).set({ status: 'cancelled', reviewDecision: 'cancelled', reviewedBy: userId, reviewedAt: new Date(), reviewReason: '用户取消尚未派发的记录' }).where(and(scopedItems(userId, taskId), eq(taskItem.status, 'pending'))).returning({ id: taskItem.id, billingUnits: taskItem.billingUnits })
     const released = cancelled.reduce((total, item) => addStr(total, multiplyStr(tk.unitPrice, item.billingUnits)), '0.0000')
     if (cancelled.length) {
       const [w] = await tx.select().from(wallet).where(eq(wallet.userId, userId)).for('update').limit(1)
+      if (!w || !gte(w.spendingReserved, released) || !gte(tk.reservedAmount, released)) throw new Error('cancellation_reconciliation_required')
       const available = addStr(w.spendingAvailable, released)
       const reserved = subStr(w.spendingReserved, released)
       await tx.update(wallet).set({ spendingAvailable: available, spendingReserved: reserved, updatedAt: new Date() }).where(eq(wallet.userId, userId))
@@ -162,12 +165,13 @@ export async function reconcileUserLeases(userId: string) {
 }
 
 export async function pendingWatchers(userId: string) {
-  return db.select({ attemptId: taskItem.attemptId }).from(taskItem).where(and(eq(taskItem.userId, userId), eq(taskItem.status, 'running'), isNull(taskItem.watcherRunId))).limit(20)
+  return db.select({ attemptId: taskItem.attemptId }).from(taskItem).where(and(eq(taskItem.userId, userId), eq(taskItem.status, 'running'), isNull(taskItem.watcherRunId), or(isNull(taskItem.watcherClaimUntil), lte(taskItem.watcherClaimUntil, new Date())))).limit(20)
 }
 
 export async function getTaskResults(userId: string, taskId: string) {
   const [tk] = await db.select().from(task).where(scopedTask(userId, taskId)).limit(1)
   if (!tk) return null
-  const items = await db.select({ index: taskItem.idx, status: taskItem.status, input: taskItem.text, output: taskItem.result, resultMeta: taskItem.resultMeta, billingUnits: taskItem.billingUnits, usage: taskItem.usage, errorCode: taskItem.errorCode }).from(taskItem).where(scopedItems(userId, taskId)).orderBy(asc(taskItem.idx))
-  return { taskId, taskType: tk.taskType, operation: tk.operation, model: tk.model, nodeName: tk.nodeName, status: tk.status, settlement: tk.settlementStatus, reservedAmount: tk.reservedAmount, items }
+  const items = await db.select({ id: taskItem.id, index: taskItem.idx, status: taskItem.status, input: taskItem.text, output: taskItem.result, resultMeta: taskItem.resultMeta, billingUnits: taskItem.billingUnits, usage: taskItem.usage, errorCode: taskItem.errorCode, attemptId: taskItem.attemptId, fence: taskItem.fence, reviewDecision: taskItem.reviewDecision, reviewedBy: taskItem.reviewedBy, reviewedAt: taskItem.reviewedAt, reviewReason: taskItem.reviewReason }).from(taskItem).where(scopedItems(userId, taskId)).orderBy(asc(taskItem.idx))
+  const [settlement] = await db.select({ acceptedAmount: taskSettlement.acceptedAmount, refundedAmount: taskSettlement.refundedAmount, providerAmount: taskSettlement.providerAmount, brokerAmount: taskSettlement.brokerAmount, platformAmount: taskSettlement.platformAmount, status: taskSettlement.status, releaseAt: taskSettlement.releaseAt, releasedAt: taskSettlement.releasedAt }).from(taskSettlement).where(and(eq(taskSettlement.userId, userId), eq(taskSettlement.taskId, taskId))).limit(1)
+  return { taskId, taskType: tk.taskType, operation: tk.operation, model: tk.model, nodeName: tk.nodeName, status: tk.status, settlement: tk.settlementStatus, reservedAmount: tk.reservedAmount, items, settlementDetail: settlement ? { ...settlement, releaseAt: settlement.releaseAt.toISOString(), releasedAt: settlement.releasedAt?.toISOString() ?? null } : null }
 }

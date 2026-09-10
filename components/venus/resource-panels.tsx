@@ -59,7 +59,7 @@ function TaskRow({ task }: { task: TaskView }) {
     <li className="flex flex-col gap-3 p-5 xl:flex-row xl:items-center xl:justify-between">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={statusStyle}>{statusLabel(task.status, locale)}</Badge>
+          <Badge variant={statusStyle}>{task.settlementStatus === 'settled' ? t('整单已处置', 'Finalized') : statusLabel(task.status, locale)}</Badge>
           <span className="text-sm text-muted-foreground">{new Date(task.createdAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US')}</span>
         </div>
         <p className="truncate pt-2 text-sm leading-relaxed">{task.instruction}</p>
@@ -69,7 +69,7 @@ function TaskRow({ task }: { task: TaskView }) {
         </p>
       </div>
       <div className="flex shrink-0 flex-wrap gap-2"><TaskResultsDialog taskId={task.id} />
-        {!task.cancelRequested && ['pending_nodes', 'queued', 'running'].includes(task.status) && (
+        {task.settlementStatus !== 'settled' && !task.cancelRequested && ['pending_nodes', 'queued', 'running'].includes(task.status) && (
           <Button variant="outline" size="sm" onClick={onCancel} disabled={pending}>
             {pending ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <X data-icon="inline-start" />}{t('取消', 'Cancel')}
           </Button>
@@ -118,7 +118,7 @@ export function EarningsPanel() {
         ['已解冻测试收益', 'Available test earnings', wallet.earningAvailable, Wallet],
       ]
     : []
-  return <div className="content-enter"><PageHeading title={t('收益账本', 'Earnings ledger')} subtitle={t('每一笔计算，都有迹可循。', 'A transparent record of every computation.')} action={<Badge variant="secondary">{t('测试账本', 'Test ledger')}</Badge>} /><div className="flex items-start gap-3 rounded-xl border border-primary/30 bg-secondary p-4 text-foreground"><Info className="size-5 shrink-0" /><p className="text-sm leading-relaxed">{t('当前为测试资金，不可充值、提现或兑换。分账比例为供给方 85%、经纪 5%、平台 10%；未绑定经纪的份额保留为未分配。', 'Test funds only: no deposits, withdrawals or conversions. Planned split: provider 85%, broker 5%, platform 10%. Unassigned broker shares remain unallocated.')}</p></div>
+  return <div className="content-enter"><PageHeading title={t('收益账本', 'Earnings ledger')} subtitle={t('每一笔计算，都有迹可循。', 'A transparent record of every computation.')} action={<Badge variant="secondary">{t('测试账本', 'Test ledger')}</Badge>} /><div className="flex items-start gap-3 rounded-xl border border-primary/30 bg-secondary p-4 text-foreground"><Info className="size-5 shrink-0" /><p className="text-sm leading-relaxed">{t('仅 VTEST 测试资金，不可充值、提现或兑换。接受金额按供给方 85%、经纪 5%、平台剩余份额分账；经纪未分配。T 从整单最终核验时计，7×24 小时后供给方测试收益可解冻，历史无快照账目不自动解冻。', 'VTEST only, with no deposits, withdrawals or conversions. Accepted work splits 85% to provider, 5% unassigned broker, and the remainder to platform. Provider test funds unlock 7×24 hours after final review; legacy entries without a snapshot are not auto-released.')}</p></div>
     {!user
       ? <section className="panel mt-6"><Empty className="min-h-72"><EmptyHeader><EmptyMedia variant="icon"><ReceiptText /></EmptyMedia><EmptyTitle>{t('每一份贡献，都会被记录', 'Every contribution will be recorded')}</EmptyTitle><EmptyDescription>{t('登录后查看属于你的测试账目，不展示虚构收入或增长。新账户将获得一次性测试预算，仅用于体验任务预留。', 'Sign in to view your own test ledger. No invented revenue or growth. New accounts receive a one-time test budget for reservations only.')}</EmptyDescription></EmptyHeader><a href="/sign-in" className="text-sm font-medium underline underline-offset-4">{t('登录', 'Sign in')}</a></Empty></section>
       : <><div className="grid grid-cols-1 gap-4 py-6 sm:grid-cols-2 lg:grid-cols-4">{metrics.map(([zh, en, value, Icon]) => { const MetricIcon = Icon; return <Card key={en} className="[--card-spacing:--spacing(5)]"><CardHeader><CardTitle><span className="flex items-center justify-between text-sm text-muted-foreground">{t(zh, en)}<MetricIcon className="size-4" /></span></CardTitle></CardHeader><CardContent><p className="font-mono text-3xl tabular-nums">{walletLoading && !wallet ? '—' : formatDisplay(value)}</p><p className="pt-2 text-sm text-muted-foreground">{wallet?.currency ?? 'VTEST'} · {t('测试', 'test')}</p></CardContent></Card> })}</div>

@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Field, FieldGroup, FieldLabel, FieldDescription, FieldError } from '@/components/ui/field'
 import { saveNodePolicy } from '@/app/actions/nodes'
-import { resourcePolicySchema } from '@/packages/node-protocol'
+import { resourcePolicySchema, capabilitySchema } from '@/packages/node-protocol'
 import type { NodeView } from '@/lib/venus/nodes'
 import { useWorkspace } from './workspace-context'
 
@@ -36,6 +36,9 @@ export function NodePolicyForm({ node, onChanged }: { node: NodeView; onChanged:
     <Button variant="outline" size="sm" onClick={() => { setPolicy(node.policy); setModels(node.policy.allowedModels.join('\n')); setError(''); setOpen(true) }}><Settings2 data-icon="inline-start" />{t('资源策略', 'Resource policy')}</Button>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-lg"><DialogHeader><DialogTitle>{t('资源策略', 'Resource policy')} · {node.name}</DialogTitle><DialogDescription>{t('仅接收你在平台内明确授权的自有节点任务。新节点默认不接单。', 'Only accepts explicitly authorized tasks for your own node. New nodes accept no work by default.')}</DialogDescription></DialogHeader>
       <form onSubmit={save}><FieldGroup>
+        <fieldset className="flex flex-col gap-3"><legend className="text-sm font-medium">{t('允许的任务能力（同时要求本机授权）', 'Allowed capabilities (local consent also required)')}</legend>
+          {capabilitySchema.options.map(capability => <Field key={capability} orientation="horizontal"><input type="checkbox" id={`${node.id}-${capability}`} className="size-4 accent-primary" checked={policy.allowedCapabilities.includes(capability)} disabled={!node.capabilities.includes(capability)} onChange={event => setPolicy({ ...policy, allowedCapabilities: event.target.checked ? [...policy.allowedCapabilities, capability] : policy.allowedCapabilities.filter(value => value !== capability) })} /><FieldLabel htmlFor={`${node.id}-${capability}`}>{capability}{!node.capabilities.includes(capability) && t(' · 本机未开放', ' · not enabled locally')}</FieldLabel></Field>)}
+        </fieldset>
         <Field orientation="horizontal"><input id={`enabled-${node.id}`} type="checkbox" checked={policy.enabled} onChange={e => setPolicy({ ...policy, enabled: e.target.checked })} className="size-4 accent-primary" /><FieldLabel htmlFor={`enabled-${node.id}`}>{t('允许此节点领取任务', 'Allow this node to claim tasks')}</FieldLabel></Field>
         <Field><FieldLabel htmlFor={`models-${node.id}`}>{t('允许的模型 · 每行一个', 'Allowed models · one per line')}</FieldLabel><Textarea id={`models-${node.id}`} value={models} onChange={e => setModels(e.target.value)} maxLength={4000} placeholder="qwen2.5:7b" className="font-mono" /><FieldDescription>{node.models.length ? t(`最近上报：${node.models.join('、')}`, `Last reported: ${node.models.join(', ')}`) : t('尚无设备上报的模型。模型名称必须与本机完全一致。', 'No reported models yet. Names must exactly match the local service.')}</FieldDescription></Field>
         <Field><FieldLabel htmlFor={`slots-${node.id}`}>{t('最多同时执行', 'Maximum concurrent executions')}</FieldLabel><Input id={`slots-${node.id}`} type="number" required min={1} max={8} value={policy.maxConcurrency} onChange={e => setPolicy({ ...policy, maxConcurrency: Number(e.target.value) })} /><FieldDescription>{t('平台与节点双重限制；不代表 GPU 显存或功耗已被隔离。', 'Enforced by platform and runtime; this does not isolate GPU memory or power.')}</FieldDescription></Field>

@@ -19,6 +19,7 @@ export type NodeView = {
   cpu: string | null
   vram: number | null
   models: string[]
+  capabilities: import('@/packages/node-protocol').Capability[]
   policy: ResourcePolicy
   createdAt: string
 }
@@ -87,7 +88,7 @@ export async function resolveNodeToken(token: string): Promise<{ nodeId: string;
   return { nodeId: identity.nodeId, userId: identity.userId }
 }
 
-export type HeartbeatInput = { cpu?: number | null; vram?: number | null; models?: string[] | null }
+export type HeartbeatInput = { cpu?: number | null; vram?: number | null; models?: string[] | null; capabilities?: import('@/packages/node-protocol').Capability[] }
 
 export async function recordHeartbeat(nodeId: string, userId: string, input: HeartbeatInput) {
   const parsed = heartbeatSchema.parse(input)
@@ -95,7 +96,7 @@ export async function recordHeartbeat(nodeId: string, userId: string, input: Hea
     const [n] = await tx.select().from(node).where(and(eq(node.id, nodeId), eq(node.userId, userId))).for('update').limit(1)
     if (!n || n.status === 'revoked') return { status: 'revoked', policy: readPolicy(null) }
     const now = new Date()
-    const telemetry = { lastSeenAt: now, cpu: parsed.cpu?.toFixed(2) ?? null, vram: parsed.vram ?? null, models: parsed.models ?? [], updatedAt: now }
+    const telemetry = { lastSeenAt: now, cpu: parsed.cpu?.toFixed(2) ?? null, vram: parsed.vram ?? null, models: parsed.models ?? [], capabilities: parsed.capabilities, updatedAt: now }
     await tx.insert(nodeHeartbeat).values({ id: randomUUID(), nodeId, userId, ...telemetry })
       .onConflictDoUpdate({ target: nodeHeartbeat.nodeId, set: telemetry })
     return { status: n.status, policy: readPolicy(n.resourcePolicy) }
@@ -127,6 +128,7 @@ export async function listNodes(userId: string): Promise<NodeView[]> {
       cpu: nodeHeartbeat.cpu,
       vram: nodeHeartbeat.vram,
       models: nodeHeartbeat.models,
+      capabilities: nodeHeartbeat.capabilities,
       policy: node.resourcePolicy,
     })
     .from(node)
@@ -145,6 +147,7 @@ export async function listNodes(userId: string): Promise<NodeView[]> {
     cpu: row.cpu ?? null,
     vram: row.vram ?? null,
     models: row.models ?? [],
+    capabilities: row.capabilities ?? ['text:infer'],
     policy: readPolicy(row.policy),
     createdAt: row.createdAt.toISOString(),
   }))
