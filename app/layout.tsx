@@ -7,7 +7,7 @@ const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono'
 
 export const metadata: Metadata = {
   title: '小黄鲸 Venus · 让每一份算力都有用武之地',
-  description: '小黄鲸 Venus 本地算力工作台。明确授权节点、模型与接单时段，管理批量文本任务、租约进度与待核验结果；资金均为不可提现测试账本。',
+  description: '小黄鲸 Venus 分布式 AI 算力工作台：连接自有节点、公网文本 API VTEST 市场、私有视频处理与企业学校组织算力；所有资金均为不可提现测试账本。',
   applicationName: '小黄鲸 Venus',
   manifest: '/manifest.webmanifest',
   appleWebApp: { capable: true, title: '小黄鲸 Venus', statusBarStyle: 'default' },

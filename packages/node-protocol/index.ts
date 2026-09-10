@@ -5,11 +5,17 @@ export const MAX_ATTEMPT_MS = 30 * 60_000
 export const modelSchema = z.string().trim().min(1).max(120).regex(/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/)
 export const taskTypeSchema = z.enum(['text', 'video', 'image'])
 export const operationSchema = z.enum(['infer', 'segment', 'transcode', 'multi_shot'])
+export const capabilitySchema = z.enum(['text:infer', 'video:segment', 'video:transcode', 'image:multi_shot'])
+export type Capability = z.infer<typeof capabilitySchema>
+export function supportsWork(capabilities: readonly string[], taskType: string, operation: string) {
+  return capabilities.includes(`${taskType}:${operation}`)
+}
 const timeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
 const localPathSchema = z.string().trim().min(1).max(4096).refine(value => !value.includes('\0'))
 
 export const resourcePolicySchema = z.object({
   enabled: z.boolean(),
+  allowedCapabilities: z.array(capabilitySchema).max(4).default(['text:infer']),
   allowedModels: z.array(modelSchema).max(32).transform(models => [...new Set(models)]),
   maxConcurrency: z.number().int().min(1).max(8),
   timeZone: z.string().max(80).refine(value => {
@@ -20,7 +26,7 @@ export const resourcePolicySchema = z.object({
 }).strict().refine(p => !p.enabled || p.allowedModels.length > 0)
 export type ResourcePolicy = z.infer<typeof resourcePolicySchema>
 export const DEFAULT_POLICY: ResourcePolicy = {
-  enabled: false, allowedModels: [], maxConcurrency: 1, timeZone: 'Asia/Shanghai', start: '00:00', end: '00:00',
+  enabled: false, allowedCapabilities: ['text:infer'], allowedModels: [], maxConcurrency: 1, timeZone: 'Asia/Shanghai', start: '00:00', end: '00:00',
 }
 export function readPolicy(value: unknown): ResourcePolicy {
   const result = resourcePolicySchema.safeParse(value)
@@ -37,6 +43,7 @@ export function canExecute(policy: ResourcePolicy, model: string, now = new Date
   return policy.allowedModels.includes(model) && withinSchedule(policy, now)
 }
 export const heartbeatSchema = z.object({
+  capabilities: z.array(capabilitySchema).max(4).default(['text:infer']),
   cpu: z.number().min(0).max(100).nullable().optional(),
   vram: z.number().int().min(0).max(10_000_000).nullable().optional(),
   models: z.array(modelSchema).max(32).nullable().optional(),
@@ -67,6 +74,15 @@ export const imageShotItemSchema = z.object({
   prompt: z.string().trim().min(1).max(8000), negativePrompt: z.string().trim().max(4000).optional(),
   outputDir: localPathSchema, fileName: z.string().trim().min(1).max(180).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/).optional(),
   seed: z.number().int().min(0).max(2147483647).optional(), width: z.number().int().min(256).max(2048).default(1024), height: z.number().int().min(256).max(2048).default(1024),
+}).strict()
+
+export const remotePrivateVideoItemSchema = z.object({
+  kind: z.literal('remote_private_media'),
+  assetId: z.string().uuid(),
+  template: z.enum(['compress_mp4', 'resize_720p', 'resize_1080p']),
+  contentType: z.enum(['video/mp4', 'video/quicktime', 'video/webm']),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  byteSize: z.number().int().positive().max(250 * 1024 * 1024),
 }).strict()
 
 export const resultSchema = leaseSchema.extend({

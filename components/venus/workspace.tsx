@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { LayoutDashboard, ListTodo, Cpu, Server, Wallet, Braces, Settings, Waves, ChevronRight, ArrowUpRight, BookOpen, Globe2, Bell, CircleHelp, UserRound, Menu, X, Plus, FlaskConical } from 'lucide-react'
+import { LayoutDashboard, ListTodo, Cpu, Server, Wallet, Braces, Settings, Waves, ChevronRight, ArrowUpRight, BookOpen, Globe2, Bell, CircleHelp, UserRound, Menu, X, FileVideo2, Building2 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -12,11 +12,15 @@ import { Overview } from './overview'
 import { TasksPanel, ComputePanel, EarningsPanel } from './resource-panels'
 import { NodesPanel, DevelopersPanel, SettingsPanel } from './connection-panels'
 import { WorkspaceDialogs } from './workspace-dialogs'
+import { OrganizationComputePanel, TextMarketPanel, VideoMarketPanel } from './marketplace-panels'
 
 const navigation = [
   { id: 'overview', zh: '总览', en: 'Overview', icon: LayoutDashboard, href: '/' },
   { id: 'tasks', zh: '任务中心', en: 'Tasks', icon: ListTodo, href: '/tasks' },
   { id: 'compute', zh: '算力池', en: 'Compute pool', icon: Cpu, href: '/compute' },
+  { id: 'text-market', zh: '文本 API 市场', en: 'Text API market', icon: Globe2, href: '/text-market' },
+  { id: 'video-market', zh: '鲸联视频', en: 'Whale video', icon: FileVideo2, href: '/video-market' },
+  { id: 'organizations', zh: '组织算力', en: 'Organization compute', icon: Building2, href: '/organizations' },
   { id: 'nodes', zh: '我的节点', en: 'My nodes', icon: Server, href: '/nodes' },
   { id: 'earnings', zh: '收益账本', en: 'Earnings', icon: Wallet, href: '/earnings' },
   { id: 'developers', zh: '开发者 / MCP', en: 'Developers / MCP', icon: Braces, href: '/developers' },
@@ -31,7 +35,7 @@ function WorkspaceShell({ section }: { section: Section }) {
   const { t, locale, setLocale, setModal, status, statusError, user } = useWorkspace()
   const [menuOpen, setMenuOpen] = useState(false)
   const active = navigation.find(item => item.id === section)!
-  const sectionPanels = { overview: <Overview />, tasks: <TasksPanel />, compute: <ComputePanel />, nodes: <NodesPanel />, earnings: <EarningsPanel />, developers: <DevelopersPanel />, settings: <SettingsPanel /> }
+  const sectionPanels = { overview: <Overview />, tasks: <TasksPanel />, compute: <ComputePanel />, 'text-market': <TextMarketPanel />, 'video-market': <VideoMarketPanel />, organizations: <OrganizationComputePanel />, nodes: <NodesPanel />, earnings: <EarningsPanel />, developers: <DevelopersPanel />, settings: <SettingsPanel /> }
   const dbLabel = statusError ? t('连接检测不可用', 'Check unavailable') : !status ? t('正在检查连接', 'Checking connection') : status.database === 'connected' ? t('数据库已连接', 'Database connected') : t('数据连接待就绪', 'Database pending')
   return <div className="min-h-dvh">
     <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-primary focus:p-3">{t('跳转到主要内容', 'Skip to content')}</a>
@@ -39,7 +43,7 @@ function WorkspaceShell({ section }: { section: Section }) {
       <div className="px-5 py-7"><Brand /></div>
       <div className="px-4 pb-6"><button onClick={() => setModal('account')} className="flex w-full items-center justify-between rounded-lg border bg-background px-3 py-2.5 text-sm"><span className="flex min-w-0 items-center gap-2"><span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-card text-foreground"><UserRound className="size-4" /></span><span className="truncate">{user ? user.name : t('个人工作空间', 'Personal workspace')}</span></span><ChevronRight className="size-4 shrink-0 text-muted-foreground" /></button></div>
       <div className="px-6 pb-2 text-sm text-muted-foreground">{t('工作台', 'WORKSPACE')}</div>
-      <nav aria-label={t('主要导航', 'Main navigation')} className="flex flex-col gap-1 px-3">{navigation.map((item, index) => <div key={item.id}>{index === 5 && <div className="px-3 pb-2 pt-6 text-sm text-muted-foreground">{t('工具与管理', 'TOOLS & MANAGEMENT')}</div>}<Link href={item.href} onClick={() => setMenuOpen(false)} className="nav-item" data-active={section === item.id} aria-current={section === item.id ? 'page' : undefined}><item.icon className="size-[18px]" strokeWidth={1.7} /><span>{t(item.zh, item.en)}</span>{item.id === 'developers' && <span className="ml-auto font-mono text-sm opacity-65">{'</>'}</span>}</Link></div>)}</nav>
+      <nav aria-label={t('主要导航', 'Main navigation')} className="flex flex-col gap-1 px-3">{navigation.map((item) => <div key={item.id}>{item.id === 'developers' && <div className="px-3 pb-2 pt-6 text-sm text-muted-foreground">{t('工具与管理', 'TOOLS & MANAGEMENT')}</div>}<Link href={item.href} onClick={() => setMenuOpen(false)} className="nav-item" data-active={section === item.id} aria-current={section === item.id ? 'page' : undefined}><item.icon className="size-[18px]" strokeWidth={1.7} /><span>{t(item.zh, item.en)}</span>{item.id === 'developers' && <span className="ml-auto font-mono text-sm opacity-65">{'</>'}</span>}</Link></div>)}</nav>
       <div className="mt-auto px-4 pb-4 pt-8"><div className="rounded-xl border bg-background p-4"><div className="flex items-center gap-2 text-sm font-medium"><BookOpen className="size-4" />{t('从这里开始', 'Start here')}</div><p className="pb-3 pt-2 text-sm leading-relaxed text-muted-foreground">{t('一份指南，开启你的算力之旅。', 'Your first steps into shared computing.')}</p><button className="flex items-center gap-2 text-sm font-medium" onClick={() => setModal('help')}>{t('阅读入门指南', 'Read the quickstart')}<ArrowUpRight className="size-4" /></button></div></div>
       <div className="border-t px-5 py-4"><button onClick={() => setModal('account')} className="flex w-full items-center gap-3 text-left"><span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-foreground"><UserRound className="size-5" /></span><span className="flex min-w-0 flex-1 flex-col"><span className="truncate text-sm font-medium">{user ? user.name : t('访客工作区', 'Guest workspace')}</span><span className="truncate text-sm text-muted-foreground">{user ? user.email : t('登录以保存你的工作', 'Sign in to save your work')}</span></span><ChevronRight className="size-4 shrink-0" /></button></div>
     </aside>

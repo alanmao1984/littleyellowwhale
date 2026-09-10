@@ -1,4 +1,7 @@
 import { createInterface } from 'node:readline/promises'
+import { readFile, stat } from 'node:fs/promises'
+import { approvedRoot, approveTemplate } from './media-security.ts'
+import { capabilitySchema, type Capability } from '../../node-protocol/index.ts'
 import { stdin, stdout } from 'node:process'
 import { z } from 'zod'
 import { detectModels, localServiceUrl, type AdapterConfig } from './adapters.ts'
@@ -21,8 +24,26 @@ async function main() {
     const allowedModels = z.array(modelSchema).min(1).max(32).parse((await io.question('允许的模型或能力名称（逗号分隔）：')).split(',').map(m => m.trim()))
     if (allowedModels.some(model => !models.includes(model))) throw new Error('至少一个模型或能力未在本机检测到。')
     const maxConcurrency = z.coerce.number().int().min(1).max(8).parse(await io.question('本机并发上限（1–8）：'))
-    const ffmpegPath = provider === 'comfyui' ? undefined : ((await io.question('ffmpeg 可执行文件路径（回车使用 PATH 中的 ffmpeg）：')).trim() || undefined)
-    adapter.ffmpegPath = ffmpegPath
+    if ((await io.question('默认仅允许文本。是否为本次会话开启媒体？输入 media 才开启：')).trim() === 'media') {
+      const inputRoot = await approvedRoot((await io.question('批准读取的现有输入根目录（绝对路径）：')).trim())
+      const outputRoot = await approvedRoot((await io.question('批准写入的现有输出根目录（绝对路径）：')).trim())
+      const capabilities = z.array(capabilitySchema).min(1).max(3).parse((await io.question(provider === 'comfyui' ? '允许操作（image:multi_shot）：' : '允许操作（video:segment,video:transcode，逗号分隔）：')).split(',').map(value => value.trim()))
+      const permitted: Capability[] = provider === 'comfyui' ? ['image:multi_shot'] : ['video:segment', 'video:transcode']
+      if (capabilities.some(value => !permitted.includes(value))) throw new Error('服务不支持该媒体能力')
+      adapter.media = { inputRoot, outputRoot, capabilities }
+      if (provider === 'comfyui') {
+        const path = (await io.question('本地批准模板 JSON 路径（workflow、allowedClasses、inputs 映射）：')).trim()
+        const info = await stat(path)
+        if (!info.isFile() || info.size > 100000) throw new Error('模板文件无效或过大')
+        adapter.media.template = approveTemplate(JSON.parse(await readFile(path, 'utf8')))
+        stdout.write(`批准模板 SHA-256：${adapter.media.template.hash}\n节点类：${adapter.media.template.allowedClasses.join(', ')}\n请仅使用专用 ComfyUI 实例；自定义节点拥有实例权限。中止不保证撤销后端副作用。\n`)
+        if ((await io.question('确认已审查模板内容与映射？输入完整 SHA-256：')).trim() !== adapter.media.template.hash) throw new Error('模板未批准')
+      } else {
+        adapter.ffmpegPath = (await io.question('本地 ffmpeg 可执行文件（回车使用 PATH 中 ffmpeg）：')).trim() || undefined
+      }
+      stdout.write(`仅批准 ${capabilities.join(', ')}；输入 ${inputRoot}；输出 ${outputRoot}。每次执行写入独立目录，不覆盖原文件。\n`)
+    }
+    if (provider === 'comfyui' && !adapter.media) throw new Error('ComfyUI 必须在本地明确批准模板和媒体权限')
     stdout.write(`仅访问平台 ${platform} 与本机 ${baseUrl}；媒体任务不会执行 shell 命令。\n`)
     if ((await io.question('同意启动此前台会话？输入 yes：')).trim() !== 'yes') return
     const code = (await io.question('网页生成的一次性配对码：')).trim()

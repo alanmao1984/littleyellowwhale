@@ -40,10 +40,11 @@ export async function saveNodePolicy(nodeId: string, input: unknown) {
   return result
 }
 
-export async function createApiToken(name: string) {
+export async function createApiToken(name: string, scope: 'read_draft' | 'market:invoke' = 'read_draft', expiresInDays = 30) {
   const userId = await getUserId()
-  const result = await createApiTokenFor(userId, typeof name === 'string' ? name : 'MCP token')
+  const result = await createApiTokenFor(userId, typeof name === 'string' ? name : 'API token', scope, expiresInDays)
   revalidatePath('/developers')
+  revalidatePath('/text-market')
   return result
 }
 

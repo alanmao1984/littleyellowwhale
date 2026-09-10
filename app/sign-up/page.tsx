@@ -1,7 +1,7 @@
 import { cookies, headers } from 'next/headers'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { auth } from '@/lib/auth'
+import { auth, authFormConfig } from '@/lib/auth'
 import { AuthForm } from '@/components/venus/auth-form'
 
 export default async function SignUpPage() {
@@ -22,7 +22,7 @@ export default async function SignUpPage() {
           <p className="pt-2 pb-6 text-sm leading-relaxed text-muted-foreground text-pretty">
             {t('使用邮箱和密码创建账户，即可开始整理任务草稿。', 'Sign up with email and password to start preparing task drafts.')}
           </p>
-          <AuthForm mode="sign-up" locale={locale} />
+          <AuthForm mode="sign-up" locale={locale} config={authFormConfig} />
         </div>
       </div>
     </main>

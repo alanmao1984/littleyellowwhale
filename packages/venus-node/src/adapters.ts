@@ -1,10 +1,18 @@
 import { spawn } from 'node:child_process'
-import { mkdir, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+import { stat, rm, mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, extname, join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
+import { MAX_MEDIA_BYTES, MAX_MEDIA_FILES, confinedPath, downloadMedia, outputDirectory, prepareApprovedPrompt, videoPaths, type LocalMediaPolicy } from './media-security.ts'
 import { z } from 'zod'
-import { imageShotItemSchema, modelSchema, videoSegmentItemSchema, videoTranscodeItemSchema, type Assignment } from '../../node-protocol/index.ts'
+import { imageShotItemSchema, modelSchema, remotePrivateVideoItemSchema, videoSegmentItemSchema, videoTranscodeItemSchema, type Assignment } from '../../node-protocol/index.ts'
 
-export type AdapterConfig = { provider: 'ollama' | 'openai' | 'comfyui'; baseUrl: string; ffmpegPath?: string }
+export type AdapterConfig = { provider: 'ollama' | 'openai' | 'comfyui'; baseUrl: string; ffmpegPath?: string; media?: LocalMediaPolicy }
+export function adapterCapabilities(config: AdapterConfig) {
+  return [...(config.provider === 'comfyui' ? [] : ['text:infer' as const]), ...(config.media?.capabilities ?? [])]
+}
 export function localServiceUrl(value: string) {
   const url = new URL(value)
   if (!['127.0.0.1', '[::1]'].includes(url.hostname) || url.protocol !== 'http:' || url.username || url.password || url.search || url.hash) throw new Error('只允许本机回环 HTTP 地址，不跟随重定向。')
@@ -25,12 +33,6 @@ export async function boundedJson(response: Response, maxBytes = 256000): Promis
     }
   } finally { reader.releaseLock() }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
-}
-async function boundedBytes(response: Response, maxBytes = 50_000_000) {
-  if (!response.ok) throw new Error('媒体下载失败')
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (bytes.byteLength > maxBytes) throw new Error('媒体响应超过安全上限')
-  return bytes
 }
 export async function detectModels(config: AdapterConfig) {
   const base = localServiceUrl(config.baseUrl)
@@ -66,67 +68,41 @@ export async function infer(config: AdapterConfig, work: Assignment, signal: Abo
   return { output: parsed.choices[0].message.content, usage: parsed.usage ? { inputTokens: parsed.usage.prompt_tokens, outputTokens: parsed.usage.completion_tokens } : null, resultMeta: { kind: 'text', provider: 'openai-compatible' } }
 }
 
-function localPath(value: string) {
-  if (!isAbsolute(value) || value.includes('\0')) throw new Error('媒体路径必须是本机绝对路径')
-  return value
-}
-function processRun(command: string, args: string[], signal: AbortSignal) {
+export function processRun(command: string, args: string[], signal: AbortSignal) {
+  signal.throwIfAborted()
   return new Promise<{ stdout: string; stderr: string }>((resolvePromise, reject) => {
     const child = spawn(command, args, { shell: false, windowsHide: true })
     let stdout = ''; let stderr = ''
     const append = (current: string, chunk: Buffer) => (current + chunk.toString('utf8')).slice(-16000)
     child.stdout.on('data', chunk => { stdout = append(stdout, chunk) })
     child.stderr.on('data', chunk => { stderr = append(stderr, chunk) })
-    const stop = () => child.kill('SIGTERM')
+    let killTimer: ReturnType<typeof setTimeout> | undefined
+    const stop = () => { child.kill('SIGTERM'); killTimer = setTimeout(() => child.kill('SIGKILL'), 2000) }
+    const cleanup = () => { signal.removeEventListener('abort', stop); clearTimeout(killTimer) }
     signal.addEventListener('abort', stop, { once: true })
-    child.once('error', error => { signal.removeEventListener('abort', stop); reject(error) })
-    child.once('close', code => { signal.removeEventListener('abort', stop); code === 0 && !signal.aborted ? resolvePromise({ stdout, stderr }) : reject(new Error(stderr || '媒体命令执行失败')) })
+    if (signal.aborted) stop()
+    child.once('error', error => { cleanup(); reject(error) })
+    child.once('close', code => { cleanup(); code === 0 && !signal.aborted ? resolvePromise({ stdout, stderr }) : reject(new Error('媒体命令未确认成功')) })
   })
 }
 async function executeVideo(config: AdapterConfig, work: Assignment, signal: AbortSignal) {
-  if (work.operation === 'segment') {
-    const item = videoSegmentItemSchema.parse(JSON.parse(work.input))
-    const inputPath = localPath(item.inputPath); const outputPath = localPath(item.outputPath)
-    if (resolve(inputPath) === resolve(outputPath)) throw new Error('输入和输出路径不能相同')
-    await mkdir(dirname(outputPath), { recursive: true })
-    const args = ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(item.startSeconds), '-i', inputPath, '-t', String(item.durationSeconds), '-map', '0', '-c:v', 'libx264', '-c:a', 'aac', outputPath]
-    await processRun(config.ffmpegPath || 'ffmpeg', args, signal)
-    const outputStat = await stat(outputPath)
-    const meta = { kind: 'video', operation: work.operation, outputPath, bytes: outputStat.size, billingUnits: work.billingUnits }
+  const item = work.operation === 'segment' ? videoSegmentItemSchema.parse(JSON.parse(work.input)) : videoTranscodeItemSchema.parse(JSON.parse(work.input))
+  if ('videoCodec' in item && (item.videoCodec !== (item.format === 'webm' ? 'libvpx-vp9' : 'libx264') || item.audioCodec !== (item.format === 'webm' ? 'opus' : 'aac'))) throw new Error('只支持固定安全编解码组合：MP4/MOV 使用 libx264+aac，WebM 使用 libvpx-vp9+opus')
+  const paths = await videoPaths(config.media!, item.inputPath, item.outputPath, item.format, work.attemptId)
+  try {
+    signal.throwIfAborted()
+    const codec = item.format === 'webm' ? ['-c:v', 'libvpx-vp9', '-c:a', 'libopus'] : ['-c:v', 'libx264', '-c:a', 'aac']
+    const trim = 'startSeconds' in item ? ['-ss', String(item.startSeconds), '-t', String(item.durationSeconds)] : []
+    const scale = 'width' in item && item.width && item.height ? ['-vf', `scale=${item.width}:${item.height}`] : []
+    const fps = 'fps' in item && item.fps ? ['-r', String(item.fps)] : []
+    const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', '-n', '-protocol_whitelist', 'file', '-f', paths.demuxer, ...(paths.demuxer === 'mov' ? ['-enable_drefs', '0', '-use_absolute_path', '0'] : []), '-i', paths.inputPath,
+      ...trim, '-map', '0:v:0?', '-map', '0:a:0?', ...codec, ...scale, ...fps, '-threads', '2', '-fs', String(MAX_MEDIA_BYTES), '-f', item.format, paths.outputPath]
+    await processRun(config.ffmpegPath || 'ffmpeg', args, AbortSignal.any([signal, AbortSignal.timeout(20 * 60_000)]))
+    const info = await stat(paths.outputPath)
+    if (!info.size || info.size >= MAX_MEDIA_BYTES) throw new Error('媒体输出为空或达到大小上限')
+    const meta = { kind: 'video', operation: work.operation, outputPath: paths.outputPath, bytes: info.size, billingUnits: work.billingUnits }
     return { output: JSON.stringify(meta), resultMeta: meta, usage: null }
-  }
-  const item = videoTranscodeItemSchema.parse(JSON.parse(work.input))
-  const inputPath = localPath(item.inputPath); const outputPath = localPath(item.outputPath)
-  if (resolve(inputPath) === resolve(outputPath)) throw new Error('输入和输出路径不能相同')
-  await mkdir(dirname(outputPath), { recursive: true })
-  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', inputPath, '-map', '0', '-c:v', item.videoCodec, '-c:a', item.audioCodec, ...(item.width && item.height ? ['-vf', `scale=${item.width}:${item.height}`] : []), ...(item.fps ? ['-r', String(item.fps)] : []), outputPath]
-  await processRun(config.ffmpegPath || 'ffmpeg', args, signal)
-  const outputStat = await stat(outputPath)
-  const meta = { kind: 'video', operation: work.operation, outputPath, bytes: outputStat.size, billingUnits: work.billingUnits }
-  return { output: JSON.stringify(meta), resultMeta: meta, usage: null }
-}
-
-function cloneWorkflow(value: Record<string, unknown>) {
-  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>
-}
-function applyShot(workflow: Record<string, unknown>, shot: z.infer<typeof imageShotItemSchema>) {
-  let promptUpdated = false
-  const visit = (value: unknown) => {
-    if (!value || typeof value !== 'object') return
-    if (Array.isArray(value)) { value.forEach(visit); return }
-    const record = value as Record<string, unknown>
-    const inputs = record.inputs
-    if (inputs && typeof inputs === 'object' && !Array.isArray(inputs)) {
-      const input = inputs as Record<string, unknown>
-      for (const key of ['prompt', 'positive', 'text']) if (!promptUpdated && typeof input[key] === 'string') { input[key] = shot.prompt; promptUpdated = true }
-      for (const key of ['negative', 'negative_prompt']) if (shot.negativePrompt && typeof input[key] === 'string') input[key] = shot.negativePrompt
-      if (shot.seed !== undefined) for (const key of ['seed', 'noise_seed']) if (typeof input[key] === 'number') input[key] = shot.seed
-    }
-    Object.values(record).forEach(visit)
-  }
-  visit(workflow)
-  if (!promptUpdated) throw new Error('ComfyUI 工作流中没有可替换的 prompt/positive/text 输入')
-  return workflow
+  } catch (error) { await rm(paths.directory, { recursive: true, force: true }); throw error }
 }
 async function comfyRequest(base: string, path: string, signal: AbortSignal, init?: RequestInit) {
   const response = await fetch(`${base}${path}`, { ...init, redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) })
@@ -136,8 +112,10 @@ async function executeComfy(config: AdapterConfig, work: Assignment, signal: Abo
   const shot = imageShotItemSchema.parse(JSON.parse(work.input))
   const spec = work.mediaSpec
   if (spec.taskType !== 'image') throw new Error('媒体配置不匹配')
+  await confinedPath(config.media!.outputRoot, shot.outputDir, 'directory')
+  signal = AbortSignal.any([signal, AbortSignal.timeout(spec.timeoutSeconds * 1000)])
   const base = localServiceUrl(config.baseUrl)
-  const promptResponse = await comfyRequest(base, '/prompt', signal, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: applyShot(cloneWorkflow(spec.comfyWorkflow), shot), client_id: `venus-${work.taskId}` }) })
+  const promptResponse = await comfyRequest(base, '/prompt', signal, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prepareApprovedPrompt(config.media?.template, work, shot), client_id: `venus-${work.attemptId}` }) })
   const prompt = z.object({ prompt_id: z.string().min(1).max(200) }).parse(await boundedJson(promptResponse))
   const deadline = Date.now() + spec.timeoutSeconds * 1000
   let history: Record<string, unknown> | null = null
@@ -146,37 +124,76 @@ async function executeComfy(config: AdapterConfig, work: Assignment, signal: Abo
     const data = await boundedJson(response, 2_000_000) as Record<string, unknown>
     const candidate = data[prompt.prompt_id]
     if (candidate && typeof candidate === 'object') { history = candidate as Record<string, unknown>; break }
-    await new Promise<void>((resolvePromise, reject) => { const timer = setTimeout(resolvePromise, 1500); signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('媒体任务已中止')) }, { once: true }) })
+    await delay(1500, undefined, { signal })
   }
   if (!history) throw new Error('ComfyUI 任务超时')
   const outputs = history.outputs && typeof history.outputs === 'object' ? history.outputs as Record<string, unknown> : {}
   const files: Array<Record<string, unknown>> = []
-  for (const output of Object.values(outputs)) {
-    if (!output || typeof output !== 'object') continue
-    const images = (output as Record<string, unknown>).images
-    if (!Array.isArray(images)) continue
-    for (const value of images) {
-      if (!value || typeof value !== 'object') continue
-      const file = value as Record<string, unknown>
-      if (typeof file.filename !== 'string') continue
-      const entry: Record<string, unknown> = { filename: file.filename, subfolder: typeof file.subfolder === 'string' ? file.subfolder : '', type: typeof file.type === 'string' ? file.type : 'output' }
-      if (shot.outputDir) {
-        const outputDir = resolve(localPath(shot.outputDir)); const outputPath = resolve(join(outputDir, String(entry.subfolder), basename(file.filename)))
-        if (relative(outputDir, outputPath).startsWith('..')) throw new Error('ComfyUI 输出路径越界')
-        await mkdir(dirname(outputPath), { recursive: true })
-        const query = new URLSearchParams({ filename: file.filename, subfolder: String(entry.subfolder), type: String(entry.type) })
-        const imageResponse = await comfyRequest(base, `/view?${query.toString()}`, signal)
-        await writeFile(outputPath, await boundedBytes(imageResponse)); entry.localPath = outputPath
+  const directory = await outputDirectory(config.media!, shot.outputDir, work.attemptId)
+  const budget = { remaining: MAX_MEDIA_BYTES }
+  try {
+    for (const output of Object.values(outputs)) {
+      if (!output || typeof output !== 'object') continue
+      const images = (output as Record<string, unknown>).images
+      if (!Array.isArray(images)) continue
+      for (const value of images) {
+        if (files.length >= MAX_MEDIA_FILES) throw new Error('媒体文件数量超限')
+        const file = z.object({ filename: z.string().max(180).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/), subfolder: z.string().max(300).default(''), type: z.literal('output').default('output') }).parse(value)
+        if (file.subfolder.split(/[\\/]/).some(part => part === '..') || file.subfolder.startsWith('/') || file.subfolder.includes(':') || file.subfolder.includes('\\') || file.subfolder.includes('\0') || !['.png', '.jpg', '.jpeg', '.webp'].includes(extname(file.filename).toLowerCase())) throw new Error('ComfyUI 文件引用不安全')
+        const outputPath = join(directory, `${files.length + 1}-${basename(file.filename)}`)
+        const response = await comfyRequest(base, `/view?${new URLSearchParams(file)}`, signal)
+        const bytes = await downloadMedia(response, outputPath, budget)
+        files.push({ ...file, localPath: outputPath, bytes })
       }
-      files.push(entry)
     }
-  }
-  if (!files.length) throw new Error('ComfyUI 没有返回图像输出')
-  const meta = { kind: 'image', provider: 'comfyui', promptId: prompt.prompt_id, files, billingUnits: work.billingUnits }
-  return { output: JSON.stringify(meta), resultMeta: meta, usage: null }
+    if (!files.length) throw new Error('ComfyUI 没有返回图像输出')
+    const meta = { kind: 'image', provider: 'comfyui', templateHash: config.media!.template!.hash, promptId: prompt.prompt_id, files, billingUnits: work.billingUnits }
+    return { output: JSON.stringify(meta), resultMeta: meta, usage: null }
+  } catch (error) { await rm(directory, { recursive: true, force: true }); throw error }
 }
 
-export async function executeMedia(config: AdapterConfig, work: Assignment, signal: AbortSignal) {
+async function authorizeTransfer(platform: string, nodeToken: string, work: Assignment, assetId: string, action: 'download' | 'upload') {
+  const response = await fetch(`${platform}/api/node/media/authorize`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${nodeToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ attemptId: work.attemptId, fence: work.fence, assetId, action }) })
+  return z.object({ token: z.string().min(20), maxBytes: z.number().int().positive(), expiresAt: z.string().datetime() }).parse(await boundedJson(response))
+}
+
+async function fileSha256(path: string) {
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(path)) hash.update(chunk)
+  return hash.digest('hex')
+}
+
+export async function executeRemoteVideo(config: AdapterConfig, work: Assignment, signal: AbortSignal, platform: string, nodeToken: string) {
+  const item = remotePrivateVideoItemSchema.parse(JSON.parse(work.input))
+  const directory = await mkdtemp(join(tmpdir(), `venus-${work.attemptId}-`))
+  const extension = item.contentType === 'video/webm' ? 'webm' : item.contentType === 'video/quicktime' ? 'mov' : 'mp4'
+  const inputPath = join(directory, `input.${extension}`); const outputPath = join(directory, 'output.mp4')
+  try {
+    const download = await authorizeTransfer(platform, nodeToken, work, item.assetId, 'download')
+    const response = await fetch(`${platform}/api/node/media/download`, { redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(10 * 60_000)]), headers: { Authorization: `Bearer ${download.token}` } })
+    await downloadMedia(response, inputPath, { remaining: Math.min(download.maxBytes, MAX_MEDIA_BYTES) })
+    if (await fileSha256(inputPath) !== item.sha256) throw new Error('输入媒体摘要不匹配')
+    const scale = item.template === 'resize_720p' ? ['-vf', 'scale=-2:720'] : item.template === 'resize_1080p' ? ['-vf', 'scale=-2:1080'] : []
+    const quality = item.template === 'compress_mp4' ? ['-crf', '28'] : ['-crf', '23']
+    await processRun(config.ffmpegPath || 'ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-n', '-protocol_whitelist', 'file', '-i', inputPath, '-map', '0:v:0?', '-map', '0:a:0?', ...scale, '-c:v', 'libx264', ...quality, '-c:a', 'aac', '-threads', '2', '-movflags', '+faststart', '-fs', String(MAX_MEDIA_BYTES), outputPath], AbortSignal.any([signal, AbortSignal.timeout(20 * 60_000)]))
+    const info = await stat(outputPath); const sha256 = await fileSha256(outputPath)
+    if (!info.size || info.size > MAX_MEDIA_BYTES) throw new Error('媒体输出无效')
+    const upload = await authorizeTransfer(platform, nodeToken, work, item.assetId, 'upload')
+    const body = createReadStream(outputPath)
+    const uploaded = await fetch(`${platform}/api/node/media/upload`, { method: 'PUT', redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(10 * 60_000)]), headers: { Authorization: `Bearer ${upload.token}`, 'Content-Type': 'video/mp4', 'Content-Length': String(info.size), 'X-Content-SHA256': sha256 }, body, duplex: 'half' } as unknown as RequestInit & { duplex: 'half' })
+    const result = z.object({ assetId: z.string().uuid() }).parse(await boundedJson(uploaded))
+    const meta = { kind: 'video', transport: 'private_blob', template: item.template, assetId: result.assetId, bytes: info.size, sha256 }
+    return { output: JSON.stringify(meta), resultMeta: meta, usage: null }
+  } finally { await rm(directory, { recursive: true, force: true }) }
+}
+
+export async function executeMedia(config: AdapterConfig, work: Assignment, signal: AbortSignal, transfer?: { platform: string; nodeToken: string }) {
+  signal.throwIfAborted()
+  if (!config.media || !config.media.capabilities.some(capability => capability === `${work.taskType}:${work.operation}`)) throw new Error('本次前台会话未授权该媒体能力')
+  if (work.taskType === 'video' && transfer) {
+    const remote = remotePrivateVideoItemSchema.safeParse(JSON.parse(work.input))
+    if (remote.success) return executeRemoteVideo(config, work, signal, transfer.platform, transfer.nodeToken)
+  }
   if (work.taskType === 'video') return executeVideo(config, work, signal)
   if (work.taskType === 'image' && config.provider === 'comfyui') return executeComfy(config, work, signal)
   throw new Error('节点适配器不支持此媒体任务')
