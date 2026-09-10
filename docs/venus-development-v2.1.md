@@ -364,7 +364,7 @@ pnpm --filter @venus/foreground-node start
 | 验收项 | 结果与局限 |
 | --- | --- |
 | 原有单元基线 | 23 项通过 |
-| 扩展单元测试 | 认证配置、邮件失败/HMAC、能力降级、路径/符号链接/覆盖/媒体头、下载限长/数量/清理、模板映射、取消、领取重试；最终数量以最终测试输出为准 |
+| 扩展单元测试 | 最终 34 项通过、0 失败、0 跳过；收尾复跑结果相同。覆盖认证配置、邮件失败/HMAC、能力降级、路径/符号链接/覆盖/媒体头、下载限长/数量/清理、模板映射、取消、领取重试 |
 | 隔离 Neon 协议与财务测试 | 授权、跨用户拒绝、同键提交/领取、并发上限、过期/fence、取消、结果冲突、核验、退款、解冻、调度竞争、余额守恒均通过；未调用真实模型 |
 | 隔离 Better Auth | 真实注册/密码登录、会话重新读取、HttpOnly/Secure/SameSite=None、退出后会话失效、429 和持久化计数通过；Cloudflare siteverify 使用测试进程内响应桩，不能替代真实供应商验收 |
 | TypeScript | `pnpm exec tsc --noEmit` 通过 |
@@ -376,7 +376,13 @@ pnpm --filter @venus/foreground-node start
 | Ollama/FFmpeg/ComfyUI | **未实机验证**；FFmpeg 不在 VM PATH，媒体测试只验证边界/协议和受控测试响应 |
 | Workflow 真实七天/部署重启 | **未验证**；测试通过调整隔离 fixture 到期时间验证数据库条件，不声称等待过七天 |
 
-浏览器证据文件：`/tmp/agent-browser/venus-sign-in-safety.png`、`venus-auth-domain-check.png`、`venus-auth-mobile.png`。截图在临时验证目录，不作为用户资产提交。验收时需重新生成，不依赖临时下载链接。
+隔离数据库最终测试输出合计 **17 项通过、0 失败、0 跳过**（Node 测试运行器统计，包含嵌套测试父项），涵盖 `execution.integration.mts`、`settlements.integration.mts` 与 `auth.integration.mts`。执行后的只读查询确认本轮 protocol-test/settlement-test 任务、settlement-test 结算、专属 auth 测试用户及隔离分支 rate_limit 表均无测试残留；不是声称清空了父分支或全部业务数据。
+
+收尾复核重新执行了 34 项单元测试、TypeScript、frozen-lockfile 与 `git diff --check`，均通过；生产构建与隔离数据库的结果已从上次完整执行日志核实，本次文档收尾未重复运行写库测试。未增加依赖、迁移、历史回填或部署操作。
+
+浏览器重新走查了 desktop 710×618 与 mobile 390×844（light）：密码/OTP 切换可用，验证码仍返回 110200，登录、发送 OTP 与验证码登录按预期禁用；未登录读取 tasks、wallet、nodes 接口均为 401。两个视口均未出现横向溢出。**工程实现与自动化记录已补齐，但真实新登录后的全流程、实机媒体成品和部署工作流恢复仍未验收，不能据此宣称生产上线就绪。**
+
+浏览器证据文件均在 `/tmp/agent-browser/`：先前的 `venus-sign-in-safety.png`、`venus-auth-domain-check.png`、`venus-auth-mobile.png`，以及收尾重新生成的 `venus-v21-sign-in-final.png`、`venus-v21-auth-mobile-final.png`。截图在临时验证目录，不作为用户资产提交。再次验收时需重新生成，不依赖临时下载链接。
 
 ### 配置完成后的人工闭环
 
