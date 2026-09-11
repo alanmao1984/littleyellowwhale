@@ -1,0 +1,294 @@
+name: Release Venus Node
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version without a leading v
+        required: true
+        type: string
+      channel:
+        description: Draft builds may be unsigned; production requires every signature and notarization check
+        required: true
+        default: draft
+        type: choice
+        options:
+          - draft
+          - production
+  pull_request:
+    paths:
+      - '.github/workflows/release-node.yml'
+      - 'installer/**'
+      - 'packages/node-protocol/**'
+      - 'packages/venus-node/**'
+      - 'scripts/build-node-sea.mjs'
+      - 'tests/node-packaging.test.mjs'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  push:
+    tags:
+      - node-v*.*.*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: venus-node-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 24.16.0
+  PNPM_VERSION: 10.34.3
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      channel: ${{ steps.release.outputs.channel }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - id: release
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            VERSION="0.1.0-pr.${{ github.event.pull_request.number }}.${GITHUB_RUN_ATTEMPT}"
+            CHANNEL="draft"
+          elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#node-v}"
+            CHANNEL="production"
+            [[ "$GITHUB_REF_NAME" == "node-v$VERSION" ]]
+          else
+            VERSION="$INPUT_VERSION"
+            CHANNEL="$INPUT_CHANNEL"
+          fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "Invalid version" >&2; exit 64; }
+          [[ "$CHANNEL" == "draft" || "$CHANNEL" == "production" ]] || { echo "Invalid channel" >&2; exit 64; }
+          if [[ "$CHANNEL" == "production" ]]; then
+            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Production requires a stable semantic version" >&2; exit 64; }
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "tag=node-v$VERSION" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm exec tsc --noEmit
+
+  windows:
+    needs: [prepare, test]
+    runs-on: windows-2025
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+      WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - shell: pwsh
+        run: corepack enable; corepack prepare "pnpm@$env:PNPM_VERSION" --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Build SEA executable
+        shell: pwsh
+        run: |
+          $env:SEA_OUTPUT_DIR = Join-Path $PWD "dist/windows"
+          pnpm node:bundle
+      - name: Sign executable and build installer
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ready = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_PFX_BASE64) -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_PFX_PASSWORD)
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool is unavailable" }
+          $binary = Join-Path $PWD "dist/windows/venus-node.exe"
+          if ($ready) {
+            $certificate = Join-Path $env:RUNNER_TEMP "venus-node.pfx"
+            [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_PFX_BASE64))
+            & $signtool.FullName sign /f $certificate /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 /td SHA256 /tr https://timestamp.digicert.com $binary
+            & $signtool.FullName verify /pa /v $binary
+          }
+          $releaseDir = Join-Path $PWD "dist/release"
+          New-Item -ItemType Directory -Force $releaseDir | Out-Null
+          $baseName = if ($ready) { "venus-node-windows-x64-setup" } else { "venus-node-windows-x64-setup-unsigned" }
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc "/DSourceExe=$binary" "/DVersion=$env:RELEASE_VERSION" "/DOutputDir=$releaseDir" "/DOutputName=$baseName" "installer/windows/venus-node.iss"
+          $asset = Join-Path $releaseDir "$baseName.exe"
+          if ($ready) {
+            & $signtool.FullName sign /f $certificate /p $env:WINDOWS_PFX_PASSWORD /fd SHA256 /td SHA256 /tr https://timestamp.digicert.com $asset
+            & $signtool.FullName verify /pa /v $asset
+          }
+          $installDir = Join-Path $env:RUNNER_TEMP "venus-node-smoke"
+          $process = Start-Process $asset -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$installDir" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer smoke test failed" }
+          $output = & (Join-Path $installDir "venus-node.exe") --version
+          if ($output.Trim() -ne $env:RELEASE_VERSION) { throw "Installed executable version mismatch" }
+          $hash = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLowerInvariant()
+          "$hash  $baseName.exe" | Set-Content -NoNewline (Join-Path $releaseDir "$baseName.exe.sha256")
+          [ordered]@{ platform = "windows"; architecture = "x64"; version = $env:RELEASE_VERSION; commit = $env:GITHUB_SHA; node = $env:NODE_VERSION; releaseReady = $ready; signed = $ready; notarized = $false } | ConvertTo-Json | Set-Content (Join-Path $releaseDir "build-windows-x64.json")
+          "release_ready=$($ready.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: venus-node-windows-x64
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    needs: [prepare, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      APPLE_CERTIFICATES_P12: ${{ secrets.APPLE_CERTIFICATES_P12 }}
+      APPLE_CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+      MACOS_APPLICATION_IDENTITY: ${{ secrets.MACOS_APPLICATION_IDENTITY }}
+      MACOS_INSTALLER_IDENTITY: ${{ secrets.MACOS_INSTALLER_IDENTITY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+      APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          architecture: ${{ matrix.arch }}
+      - run: corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Build SEA executable
+        run: SEA_OUTPUT_DIR="$PWD/dist/macos-${{ matrix.arch }}" pnpm node:bundle
+      - name: Import signing identities
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          READY=true
+          for value in APPLE_CERTIFICATES_P12 APPLE_CERTIFICATES_PASSWORD MACOS_APPLICATION_IDENTITY MACOS_INSTALLER_IDENTITY APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_API_KEY_P8; do
+            [[ -n "${!value:-}" ]] || READY=false
+          done
+          if [[ "$READY" == true ]]; then
+            KEYCHAIN="$RUNNER_TEMP/venus-node.keychain-db"
+            KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+            security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+            security set-keychain-settings -lut 21600 "$KEYCHAIN"
+            security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+            echo "$APPLE_CERTIFICATES_P12" | base64 -D > "$RUNNER_TEMP/certificates.p12"
+            security import "$RUNNER_TEMP/certificates.p12" -P "$APPLE_CERTIFICATES_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+            security list-keychain -d user -s "$KEYCHAIN"
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          fi
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+      - name: Package, notarize, and smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_DIR="$PWD/dist/release"
+          mkdir -p "$RELEASE_DIR"
+          if [[ "${{ steps.identity.outputs.ready }}" == true ]]; then
+            NAME="venus-node-macos-${{ matrix.arch }}"
+          else
+            NAME="venus-node-macos-${{ matrix.arch }}-unsigned"
+            unset MACOS_APPLICATION_IDENTITY MACOS_INSTALLER_IDENTITY
+          fi
+          ASSET="$RELEASE_DIR/$NAME.pkg"
+          bash installer/macos/build-pkg.sh "$PWD/dist/macos-${{ matrix.arch }}/venus-node" "$RELEASE_VERSION" "${{ matrix.arch }}" "$ASSET"
+          READY=${{ steps.identity.outputs.ready }}
+          if [[ "$READY" == true ]]; then
+            KEY_FILE="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+            printf '%s' "$APPLE_API_KEY_P8" > "$KEY_FILE"
+            chmod 600 "$KEY_FILE"
+            xcrun notarytool submit "$ASSET" --key "$KEY_FILE" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --wait
+            xcrun stapler staple "$ASSET"
+            xcrun stapler validate "$ASSET"
+            spctl --assess --type install --verbose=2 "$ASSET"
+          fi
+          sudo installer -pkg "$ASSET" -target /
+          INSTALLED="/Applications/Venus Node.app/Contents/Resources/venus-node"
+          [[ "$($INSTALLED --version)" == "$RELEASE_VERSION" ]]
+          shasum -a 256 "$ASSET" | sed "s#  .*#  $NAME.pkg#" > "$RELEASE_DIR/$NAME.pkg.sha256"
+          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({platform:"macos",architecture:process.argv[2],version:process.env.RELEASE_VERSION,commit:process.env.GITHUB_SHA,node:process.env.NODE_VERSION,releaseReady:process.argv[3]==="true",signed:process.argv[3]==="true",notarized:process.argv[3]==="true"},null,2))' "$RELEASE_DIR/build-macos-${{ matrix.arch }}.json" "${{ matrix.arch }}" "$READY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: venus-node-macos-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    if: github.event_name != 'pull_request'
+    needs: [prepare, windows, macos]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      CHANNEL: ${{ needs.prepare.outputs.channel }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: venus-node-*
+          path: release
+          merge-multiple: true
+      - name: Verify assets and release policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          cat ./*.sha256 | sort > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          [[ $(find . -maxdepth 1 -name 'build-*.json' | wc -l) -eq 3 ]]
+          ALL_READY=$(node -e 'const fs=require("fs"); const files=fs.readdirSync(".").filter(x=>/^build-.*\.json$/.test(x)); process.stdout.write(String(files.length===3&&files.every(x=>JSON.parse(fs.readFileSync(x)).releaseReady===true)))')
+          if [[ "$CHANNEL" == production && "$ALL_READY" != true ]]; then
+            echo "Production release requires Windows signing plus macOS signing and notarization on both architectures." >&2
+            exit 1
+          fi
+          if [[ "$CHANNEL" == production ]]; then
+            [[ -f venus-node-windows-x64-setup.exe ]]
+            [[ -f venus-node-macos-arm64.pkg ]]
+            [[ -f venus-node-macos-x64.pkg ]]
+          fi
+      - name: Create GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Venus Node $VERSION 提供 Windows x64、macOS Apple Silicon 与 macOS Intel 安装包。
+
+          节点仅以前台交互方式运行：不会安装常驻服务、自动下载模型或修改防火墙。首次启动仍需用户确认本机能力、资源边界并输入一次性配对码。请使用随附 SHA256SUMS 核验下载文件。
+          EOF
+          FLAGS=(--target "$GITHUB_SHA" --title "Venus Node v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md")
+          if [[ "$CHANNEL" == draft ]]; then
+            FLAGS+=(--draft --prerelease)
+          else
+            FLAGS+=(--latest)
+          fi
+          gh release create "$TAG" "${FLAGS[@]}" release/*.exe release/*.pkg release/SHA256SUMS release/build-*.json

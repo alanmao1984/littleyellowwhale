@@ -7,6 +7,21 @@ import { fetchJson, pollingConfig } from './request'
 
 const fetcher = fetchJson
 
+type NodeReleasePlatform = 'windows' | 'macos-arm64' | 'macos-x64'
+export type NodeReleaseManifest = {
+  version: string | null
+  platforms: Record<NodeReleasePlatform, { available: boolean; fileName: string }>
+}
+
+export function useNodeRelease() {
+  const { data, error, isLoading, mutate } = useSWR<NodeReleaseManifest>(
+    '/api/downloads/node',
+    fetcher,
+    { ...pollingConfig, revalidateOnFocus: false, dedupingInterval: 300000 },
+  )
+  return { release: data, releaseError: Boolean(error), releaseLoading: isLoading, refreshRelease: mutate }
+}
+
 // Each hook only fetches when the workspace knows a user is signed in, so a
 // guest view never triggers a 401 request.
 export function useWallet(enabled: boolean) {

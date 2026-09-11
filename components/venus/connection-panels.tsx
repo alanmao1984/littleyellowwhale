@@ -11,17 +11,51 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { useWorkspace } from './workspace-context'
 import { PageHeading } from './workspace'
-import { useApiTokens, useNodes } from '@/lib/venus/use-workspace-data'
+import { useApiTokens, useNodeRelease, useNodes } from '@/lib/venus/use-workspace-data'
 import { createApiToken, generateEnrollmentCode, revokeApiToken, setNodeStatus } from '@/app/actions/nodes'
 import type { NodeView } from '@/lib/venus/nodes'
 import { cn } from '@/lib/utils'
 import { NodePolicyForm } from './node-policy-form'
 
 export const repository = 'https://github.com/alanmao1984/littleyellowwhale'
+export type NodeOperatingSystem = 'windows' | 'macos'
+
+export function NodeInstallerDownloads({ platform }: { platform: NodeOperatingSystem }) {
+  const { t } = useWorkspace()
+  const { release, releaseError, releaseLoading } = useNodeRelease()
+  const choices = platform === 'windows'
+    ? [{ key: 'windows' as const, label: t('下载 Windows x64 安装程序', 'Download for Windows x64') }]
+    : [
+        { key: 'macos-arm64' as const, label: t('下载 Apple Silicon 版', 'Download for Apple Silicon') },
+        { key: 'macos-x64' as const, label: t('下载 Intel Mac 版', 'Download for Intel Mac') },
+      ]
+  const available = choices.some(choice => release?.platforms[choice.key].available)
+  const status = releaseLoading
+    ? t('正在检查正式版本', 'Checking the verified release')
+    : releaseError
+      ? t('暂时无法检查安装包', 'Installer status unavailable')
+      : available
+        ? t(`正式签名版 v${release?.version}`, `Verified release v${release?.version}`)
+        : t('正式安装包准备中', 'Verified installers are being prepared')
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border bg-secondary p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2"><Download className="size-4" /><span className="text-sm font-medium">{t('节点安装程序', 'Node installer')}</span></div>
+        <Badge variant={available ? 'secondary' : 'outline'}>{status}</Badge>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        {choices.map(choice => release?.platforms[choice.key].available
+          ? <a key={choice.key} href={`/api/downloads/node/${choice.key}`} className={cn(buttonVariants(), 'w-full sm:w-auto')}><Download className="size-4" />{choice.label}</a>
+          : <Button key={choice.key} disabled className="w-full sm:w-auto">{releaseLoading ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Download data-icon="inline-start" />}{choice.label}</Button>)}
+      </div>
+      <p className="text-sm leading-relaxed text-muted-foreground">{t('浏览器只会开始下载。系统仍会要求你确认安装；程序不会注册后台服务、自动下载模型或修改防火墙。', 'The browser only starts the download. Your system still asks you to approve installation. The app does not register a background service, download models, or change your firewall.')}</p>
+    </div>
+  )
+}
 
 function EnrollmentFlow({ onCreated }: { onCreated: () => void }) {
   const { t } = useWorkspace()
-  const [platform, setPlatform] = useState('windows')
+  const [platform, setPlatform] = useState<NodeOperatingSystem>('windows')
   const [name, setName] = useState('')
   const [pending, setPending] = useState(false)
   const [issued, setIssued] = useState<{ code: string; expiresAt: string } | null>(null)
@@ -41,9 +75,17 @@ function EnrollmentFlow({ onCreated }: { onCreated: () => void }) {
     catch { toast.error(t('复制失败，请手动复制。', 'Copy failed. Copy manually.')) }
   }
   return (
-    <div className="flex flex-col gap-4 rounded-xl border bg-background p-5">
-      <div className="flex flex-wrap items-end gap-3">
-        <Tabs value={platform} onValueChange={(value) => setPlatform(String(value))}><TabsList><TabsTrigger value="windows">Windows</TabsTrigger><TabsTrigger value="macos">macOS</TabsTrigger></TabsList></Tabs>
+    <div className="flex flex-col gap-5 rounded-xl border bg-background p-5">
+      <Tabs value={platform} onValueChange={(value) => { setPlatform(value as NodeOperatingSystem); setIssued(null) }}><TabsList><TabsTrigger value="windows">Windows</TabsTrigger><TabsTrigger value="macos">macOS</TabsTrigger></TabsList></Tabs>
+      <ol className="grid gap-4 md:grid-cols-3">
+        {[
+          [t('下载安装程序', 'Download the installer'), t('选择设备架构，下载后由系统确认安装。', 'Choose your device architecture, then approve installation in your system.')],
+          [t('启动并本机授权', 'Launch and approve locally'), t('打开 Venus Node，确认本机服务、模型和资源边界。', 'Open Venus Node and approve the local service, models, and resource boundaries.')],
+          [t('输入一次性配对码', 'Enter a one-time code'), t('在下方生成配对码，并输入到前台节点程序。', 'Generate a code below and enter it in the foreground node app.')],
+        ].map(([title, detail], index) => <li key={title} className="flex items-start gap-3"><span className="flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-sm">{index + 1}</span><div><h3 className="text-sm font-medium">{title}</h3><p className="pt-1 text-sm leading-relaxed text-muted-foreground">{detail}</p></div></li>)}
+      </ol>
+      <NodeInstallerDownloads platform={platform} />
+      <div className="flex flex-wrap items-end gap-3 border-t pt-5">
         <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('节点名称（可选）', 'Node name (optional)')} maxLength={60} className="w-48" aria-label={t('节点名称', 'Node name')} />
         <Button onClick={generate} disabled={pending}>{pending ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Plus data-icon="inline-start" />}{t('生成配对码', 'Generate pairing code')}</Button>
       </div>
@@ -183,7 +225,7 @@ export function DevelopersPanel() {
 export function SettingsPanel() {
   const { t, locale, setLocale, setModal, status, statusError, refreshStatus } = useWorkspace()
   return <div className="content-enter"><PageHeading title={t('设置', 'Settings')} subtitle={t('管理偏好，了解工作空间的真实状态。', 'Manage your preferences and review the actual workspace status.')} />
-    <div className="flex flex-col gap-5"><section className="panel"><div className="border-b px-6 py-4"><h2 className="section-heading">{t('工作空间状态', 'Workspace status')}</h2></div><div className="divide-y divide-border px-6"><div className="flex flex-wrap items-center justify-between gap-3 py-5"><div><h3 className="text-sm font-medium">Neon PostgreSQL</h3><p className="pt-1 text-sm text-muted-foreground">{t('由服务器执行实际连接检查，不读取个人数据。', 'A real server-side connection check. No personal data is read.')}</p></div><div className="flex items-center gap-2"><Badge variant={status?.database === 'connected' ? 'secondary' : 'outline'}>{statusError ? t('检测不可用', 'Check unavailable') : !status ? t('正在检测', 'Checking') : status.database === 'connected' ? t('连接正常', 'Connected') : status.database === 'pending' ? t('环境配置待就绪', 'Configuration pending') : t('暂时不可用', 'Unavailable')}</Badge><Button variant="ghost" size="icon" onClick={refreshStatus} aria-label={t('重新检查数据库', 'Recheck database')}><RefreshCw /></Button></div></div><div className="flex flex-wrap items-center justify-between gap-3 py-5"><div><h3 className="text-sm font-medium">{t('账户与登录', 'Accounts & authentication')}</h3><p className="pt-1 text-sm text-muted-foreground">{t('Better Auth 邮箱密码登录，每用户数据隔离与服务端会话校验。', 'Better Auth email and password login, with per-user data isolation and server-side session checks.')}</p></div><Badge variant={status?.authentication === 'ready' ? 'secondary' : 'outline'}>{statusError ? t('检测不可用', 'Check unavailable') : status?.authentication === 'ready' ? t('已就绪', 'Ready') : t('待就绪', 'Pending')}</Badge></div><div className="flex flex-wrap items-center justify-between gap-3 py-5"><div><h3 className="text-sm font-medium">{t('节点协议与安装包', 'Node protocol & installers')}</h3><p className="pt-1 text-sm text-muted-foreground">{t('配对绑定、限权凭据与心跳协议已可用于测试；Windows / macOS 安装与常驻运行尚未实测。', 'Pairing, scoped credentials and the heartbeat protocol are available for testing; Windows / macOS installation and background execution are not yet tested.')}</p></div><Badge variant="outline">{t('协议就绪 · 真机待验证', 'Protocol ready · devices unverified')}</Badge></div></div></section>
+    <div className="flex flex-col gap-5"><section className="panel"><div className="border-b px-6 py-4"><h2 className="section-heading">{t('工作空间状态', 'Workspace status')}</h2></div><div className="divide-y divide-border px-6"><div className="flex flex-wrap items-center justify-between gap-3 py-5"><div><h3 className="text-sm font-medium">Neon PostgreSQL</h3><p className="pt-1 text-sm text-muted-foreground">{t('由服务器执行实际连接检查，不读取个人数据。', 'A real server-side connection check. No personal data is read.')}</p></div><div className="flex items-center gap-2"><Badge variant={status?.database === 'connected' ? 'secondary' : 'outline'}>{statusError ? t('检测不可用', 'Check unavailable') : !status ? t('正在检测', 'Checking') : status.database === 'connected' ? t('连接正常', 'Connected') : status.database === 'pending' ? t('环境配置待就绪', 'Configuration pending') : t('暂时不可用', 'Unavailable')}</Badge><Button variant="ghost" size="icon" onClick={refreshStatus} aria-label={t('重新检查数据库', 'Recheck database')}><RefreshCw /></Button></div></div><div className="flex flex-wrap items-center justify-between gap-3 py-5"><div><h3 className="text-sm font-medium">{t('账户与登录', 'Accounts & authentication')}</h3><p className="pt-1 text-sm text-muted-foreground">{t('Better Auth 邮箱密码登录，每用户数据隔离与服务端会话校验。', 'Better Auth email and password login, with per-user data isolation and server-side session checks.')}</p></div><Badge variant={status?.authentication === 'ready' ? 'secondary' : 'outline'}>{statusError ? t('检测不可用', 'Check unavailable') : status?.authentication === 'ready' ? t('已就绪', 'Ready') : t('待就绪', 'Pending')}</Badge></div><div className="flex flex-wrap items-center justify-between gap-3 py-5"><div><h3 className="text-sm font-medium">{t('节点协议与安装包', 'Node protocol & installers')}</h3><p className="pt-1 text-sm text-muted-foreground">{t('配对、限权凭据与心跳协议已就绪；Windows / macOS 安装包通过公开 Release 分发，节点仅以前台终端运行。', 'Pairing, scoped credentials, and heartbeat are ready. Windows and macOS installers are distributed through public Releases, and the node runs only in a foreground terminal.')}</p></div><Badge variant="outline">{t('协议就绪 · 真机待验证', 'Protocol ready · devices unverified')}</Badge></div></div></section>
     <section className="panel"><div className="border-b px-6 py-4"><h2 className="section-heading">{t('偏好设置', 'Preferences')}</h2></div><div className="divide-y divide-border px-6"><div className="flex flex-wrap items-center justify-between gap-4 py-5"><div><h3 className="flex items-center gap-2 text-sm font-medium"><Globe2 className="size-4" />{t('显示语言', 'Display language')}</h3><p className="pt-1 text-sm text-muted-foreground">{t('保存在浏览器偏好 Cookie 中，不存储任务内容。', 'Saved as a preference cookie. No task content is stored.')}</p></div><Tabs value={locale} onValueChange={value => setLocale(value as 'zh' | 'en')}><TabsList><TabsTrigger value="zh">中文</TabsTrigger><TabsTrigger value="en">English</TabsTrigger></TabsList></Tabs></div><div className="flex flex-wrap items-center justify-between gap-4 py-5"><div><h3 className="text-sm font-medium">{t('添加到主屏幕', 'Add to your home screen')}</h3><p className="pt-1 text-sm text-muted-foreground">{t('安装 Web 应用，随时打开工作台。', 'Install the web app for quick access to your workspace.')}</p></div><Button variant="outline" onClick={() => setModal('install')}><Download data-icon="inline-start" />{t('安装指南', 'Install guide')}</Button></div></div></section>
     <section className="panel p-6"><h2 className="section-heading">{t('源码与交付', 'Source & delivery')}</h2><p className="pb-4 pt-2 text-sm leading-relaxed text-muted-foreground">{t('以下为指定的交付仓库，尚未推送或创建 Release。开发与验证完成后，将再次确认授权与远程历史。', 'This is the designated delivery repository. No code has been pushed or releases created. Authorization and remote history will be checked before delivery.')}</p><a href={repository} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 break-all font-mono text-sm underline-offset-4 hover:underline"><GitBranch className="size-4 shrink-0" />alanmao1984/littleyellowwhale<ArrowUpRight className="size-4 shrink-0" /></a></section></div>
   </div>
