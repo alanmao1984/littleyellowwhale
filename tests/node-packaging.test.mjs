@@ -35,4 +35,14 @@ test('原生安装器不注册服务或自动启动', async () => {
   assert.doesNotMatch(`${windows}\n${macos}`, /\b(sc\.exe|launchctl|RunOnce|service)\b/i)
   assert.match(windows, /postinstall nowait skipifsilent unchecked/)
   assert.match(macos, /application "Terminal"/)
+  assert.match(macos, /pkgbuild .*--version "\$BUNDLE_VERSION"/)
+})
+
+test('Pull Request 构建三种安装包但不创建 Release', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/release-node.yml', import.meta.url), 'utf8')
+  assert.match(workflow, /^  pull_request:/m)
+  assert.match(workflow, /runs-on: windows-2025/)
+  assert.match(workflow, /runner: macos-14/)
+  assert.match(workflow, /runner: macos-15-intel/)
+  assert.match(workflow, /if: github\.event_name != 'pull_request'/)
 })

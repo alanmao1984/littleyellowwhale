@@ -62,7 +62,7 @@ if [[ -n "${MACOS_APPLICATION_IDENTITY:-}" ]]; then
 fi
 
 COMPONENT="$WORK/venus-node-component.pkg"
-pkgbuild --root "$WORK/root" --identifier com.littleyellowwhale.venus-node --version "$VERSION" --install-location / "$COMPONENT"
+pkgbuild --root "$WORK/root" --identifier com.littleyellowwhale.venus-node --version "$BUNDLE_VERSION" --install-location / "$COMPONENT"
 if [[ -n "${MACOS_INSTALLER_IDENTITY:-}" ]]; then
   productsign --sign "$MACOS_INSTALLER_IDENTITY" --timestamp "$COMPONENT" "$OUTPUT"
   pkgutil --check-signature "$OUTPUT"
