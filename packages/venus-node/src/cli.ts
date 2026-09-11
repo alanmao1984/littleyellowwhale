@@ -8,8 +8,22 @@ import { detectModels, localServiceUrl, type AdapterConfig } from './adapters.ts
 import { platformRequest, platformUrl, runNode } from './runtime.ts'
 import { modelSchema } from '../../node-protocol/index.ts'
 
+declare const __VENUS_VERSION__: string | undefined
+
+const version = typeof __VENUS_VERSION__ === 'string' ? __VENUS_VERSION__ : '0.1.0-dev'
+const help = `Venus 前台节点 ${version}
+
+用法：venus-node [--help | --version]
+
+不带参数时进入交互式配对流程。节点仅以前台方式运行，凭据只驻留内存；
+不会安装后台服务、下载模型或修改防火墙。`
+
 async function main() {
-  if (!stdin.isTTY) throw new Error('仅支持交互式前台启动；不接受管道脚本或静默安装。')
+  const args = process.argv.slice(2)
+  if (args.length === 1 && (args[0] === '--version' || args[0] === '-v')) { stdout.write(`${version}\n`); return }
+  if (args.length === 1 && (args[0] === '--help' || args[0] === '-h')) { stdout.write(`${help}\n`); return }
+  if (args.length > 0) throw new Error('不支持该启动参数。请使用 --help 查看安全启动方式。')
+  if (!stdin.isTTY || !stdout.isTTY) throw new Error('仅支持交互式前台启动；不接受管道脚本或静默安装。')
   const io = createInterface({ input: stdin, output: stdout })
   let token = ''
   let config: { platform: string; adapter: AdapterConfig; allowedModels: string[]; maxConcurrency: number }
