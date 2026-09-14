@@ -3,10 +3,12 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { auth, authFormConfig } from '@/lib/auth'
 import { AuthForm } from '@/components/venus/auth-form'
+import { safeDashboardReturnTo } from '@/lib/venus/safe-return-to'
 
-export default async function SignInPage() {
+export default async function SignInPage({ searchParams }: { searchParams: Promise<{ next?: string | string[] }> }) {
+  const returnTo = safeDashboardReturnTo((await searchParams).next)
   const session = await auth.api.getSession({ headers: await headers() })
-  if (session?.user) redirect('/')
+  if (session?.user) redirect(returnTo)
   const locale = (await cookies()).get('venus-locale')?.value === 'en' ? 'en' : 'zh'
   const t = (zh: string, en: string) => (locale === 'zh' ? zh : en)
   return (
@@ -22,7 +24,7 @@ export default async function SignInPage() {
           <p className="pt-2 pb-6 text-sm leading-relaxed text-muted-foreground text-pretty">
             {t('管理批量任务、算力节点与测试收益账本。', 'Manage batch tasks, compute nodes, and your test ledger.')}
           </p>
-          <AuthForm mode="sign-in" locale={locale} config={authFormConfig} />
+          <AuthForm mode="sign-in" locale={locale} config={authFormConfig} returnTo={returnTo} />
         </div>
       </div>
     </main>

@@ -1,7 +1,15 @@
 import { withWorkflow } from 'workflow/next'
 
 /** @type {import('next').NextConfig} */
+const dashboardSections = ['tasks', 'compute', 'text-market', 'video-market', 'market', 'organizations', 'nodes', 'earnings', 'developers', 'settings']
+
 const nextConfig = {
+  async redirects() {
+    return [
+      ...dashboardSections.map(section => ({ source: `/${section}`, destination: `/app/${section}`, permanent: true })),
+      { source: '/wallet', destination: '/app/earnings', permanent: true },
+    ]
+  },
   async headers() {
     return [{ source: '/:path*', headers: [
       { key: 'X-Content-Type-Options', value: 'nosniff' },
