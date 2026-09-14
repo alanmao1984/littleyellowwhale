@@ -1,4 +1,10 @@
-# 小黄鲸 Venus
+<p align="center">
+  <img src="https://xiaohuangjing.com/brand/venus-seal.png" width="180" alt="小黄鲸 Venus 圆形品牌徽章" />
+</p>
+
+<h1 align="center">小黄鲸 Venus</h1>
+
+<p align="center"><strong>Venus · little yellow whale</strong></p>
 
 面向 AI API、GPU 节点与智能体能力的算力流动性测试网络。Venus 将任务路由、节点执行、用量核验和测试结算放在同一套工作台中，让开发者调用可发现的能力，也让设备所有者在明确授权的前提下贡献闲置算力。
 
