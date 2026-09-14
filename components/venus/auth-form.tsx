@@ -19,7 +19,7 @@ type CaptchaRequestOptions = {
   headers: { 'x-captcha-response': string }
 }
 
-export function AuthForm({ mode, locale, config }: { mode: Mode; locale: Locale; config: { captcha: { ready: boolean; siteKey: string | null; testing: boolean }; emailReady: boolean; socialProviders: SocialProvider[] } }) {
+export function AuthForm({ mode, locale, config, returnTo = '/app' }: { mode: Mode; locale: Locale; config: { captcha: { ready: boolean; siteKey: string | null; testing: boolean }; emailReady: boolean; socialProviders: SocialProvider[] }; returnTo?: string }) {
   const t = (zh: string, en: string) => (locale === 'zh' ? zh : en)
   const router = useRouter()
   const [name, setName] = useState('')
@@ -86,7 +86,7 @@ export function AuthForm({ mode, locale, config }: { mode: Mode; locale: Locale;
         )
         return
       }
-      router.push('/')
+      router.push(returnTo)
       router.refresh()
     } catch {
       setError(t('网络异常，请稍后再试。', 'Network error. Please try again.'))
@@ -145,7 +145,7 @@ export function AuthForm({ mode, locale, config }: { mode: Mode; locale: Locale;
         setError(t('验证码不正确或已过期。', 'The code is invalid or expired.'))
         return
       }
-      router.push('/')
+      router.push(returnTo)
       router.refresh()
     } catch {
       setError(t('网络异常，请稍后再试。', 'Network error. Please try again.'))
@@ -160,7 +160,7 @@ export function AuthForm({ mode, locale, config }: { mode: Mode; locale: Locale;
     setNotice('')
     setPending(true)
     try {
-      const result = await authClient.signIn.social({ provider, callbackURL: '/' })
+      const result = await authClient.signIn.social({ provider, callbackURL: returnTo })
       if (result.error) {
         setError(
           t(
@@ -260,12 +260,12 @@ export function AuthForm({ mode, locale, config }: { mode: Mode; locale: Locale;
         {mode === 'sign-up' ? (
           <>
             {t('已有账户？', 'Already have an account? ')}
-            <Link href="/sign-in" className="font-medium text-foreground underline underline-offset-4">{t('去登录', 'Sign in')}</Link>
+            <Link href={`/sign-in?next=${encodeURIComponent(returnTo)}`} className="font-medium text-foreground underline underline-offset-4">{t('去登录', 'Sign in')}</Link>
           </>
         ) : (
           <>
             {t('还没有账户？', "Don't have an account? ")}
-            <Link href="/sign-up" className="font-medium text-foreground underline underline-offset-4">{t('免费注册', 'Create one')}</Link>
+            <Link href={`/sign-up?next=${encodeURIComponent(returnTo)}`} className="font-medium text-foreground underline underline-offset-4">{t('免费注册', 'Create one')}</Link>
           </>
         )}
       </p>

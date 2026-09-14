@@ -16,17 +16,17 @@ import { OrganizationComputePanel, TextMarketPanel, VideoMarketPanel } from './m
 import { MarketActivityPanel } from './market-activity-panel'
 
 const navigation = [
-  { id: 'overview', zh: '总览', en: 'Overview', icon: LayoutDashboard, href: '/' },
-  { id: 'tasks', zh: '任务中心', en: 'Tasks', icon: ListTodo, href: '/tasks' },
-  { id: 'compute', zh: '算力池', en: 'Compute pool', icon: Cpu, href: '/compute' },
-  { id: 'text-market', zh: '文本 API 市场', en: 'Text API market', icon: Globe2, href: '/text-market' },
-  { id: 'video-market', zh: '鲸联视频', en: 'Whale video', icon: FileVideo2, href: '/video-market' },
-  { id: 'market', zh: '市场动态', en: 'Market activity', icon: Activity, href: '/market' },
-  { id: 'organizations', zh: '组织算力', en: 'Organization compute', icon: Building2, href: '/organizations' },
-  { id: 'nodes', zh: '我的节点', en: 'My nodes', icon: Server, href: '/nodes' },
-  { id: 'earnings', zh: '收益账本', en: 'Earnings', icon: Wallet, href: '/earnings' },
-  { id: 'developers', zh: '开发者 / MCP', en: 'Developers / MCP', icon: Braces, href: '/developers' },
-  { id: 'settings', zh: '设置', en: 'Settings', icon: Settings, href: '/settings' },
+  { id: 'overview', zh: '总览', en: 'Overview', icon: LayoutDashboard, href: '/app' },
+  { id: 'tasks', zh: '任务中心', en: 'Tasks', icon: ListTodo, href: '/app/tasks' },
+  { id: 'compute', zh: '算力池', en: 'Compute pool', icon: Cpu, href: '/app/compute' },
+  { id: 'text-market', zh: '文本 API 市场', en: 'Text API market', icon: Globe2, href: '/app/text-market' },
+  { id: 'video-market', zh: '鲸联视频', en: 'Whale video', icon: FileVideo2, href: '/app/video-market' },
+  { id: 'market', zh: '市场动态', en: 'Market activity', icon: Activity, href: '/app/market' },
+  { id: 'organizations', zh: '组织算力', en: 'Organization compute', icon: Building2, href: '/app/organizations' },
+  { id: 'nodes', zh: '我的节点', en: 'My nodes', icon: Server, href: '/app/nodes' },
+  { id: 'earnings', zh: '收益账本', en: 'Earnings', icon: Wallet, href: '/app/earnings' },
+  { id: 'developers', zh: '开发者 / MCP', en: 'Developers / MCP', icon: Braces, href: '/app/developers' },
+  { id: 'settings', zh: '设置', en: 'Settings', icon: Settings, href: '/app/settings' },
 ] as const
 
 function Brand() {
@@ -56,7 +56,7 @@ function WorkspaceShell({ section }: { section: Section }) {
         <div className="flex items-center gap-2 sm:gap-4"><Button variant="ghost" size="sm" onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')} aria-label={t('切换为英文', 'Switch to Chinese')}><Globe2 data-icon="inline-start" />{locale === 'zh' ? '中文' : 'English'}</Button><span className="h-5 w-px bg-border" /><Button variant="ghost" size="icon" onClick={() => setModal('help')} aria-label={t('帮助中心', 'Help center')}><CircleHelp /></Button><Button variant="ghost" size="icon" onClick={() => setModal('notifications')} aria-label={t('通知', 'Notifications')}><Bell /></Button><button onClick={() => setModal('account')} className="hidden size-8 items-center justify-center rounded-full bg-secondary text-foreground sm:flex" aria-label={t('账户', 'Account')}><UserRound className="size-4" /></button></div>
       </header>
       <main id="main-content" className="mx-auto max-w-[1500px] px-5 pb-28 pt-7 sm:px-8 xl:px-9 xl:pb-8">{sectionPanels[section]}</main>
-      <footer className="mx-5 mb-24 flex flex-col justify-between border-t py-5 text-sm text-muted-foreground sm:mx-8 sm:flex-row xl:mb-0"><p>© {new Date().getFullYear()} {t('小黄鲸 Venus · 让算力自由连接', 'Venus · Connecting idle power')}</p><button className="flex items-center gap-2 pt-2 text-left sm:pt-0" onClick={() => { window.location.href = '/settings' }}><span className={cn('size-1.5 rounded-full', status?.database === 'connected' ? 'bg-primary' : 'bg-muted-foreground')} />{dbLabel}<ChevronRight className="size-3" /></button></footer>
+      <footer className="mx-5 mb-24 flex flex-col justify-between border-t py-5 text-sm text-muted-foreground sm:mx-8 sm:flex-row xl:mb-0"><p>© {new Date().getFullYear()} {t('小黄鲸 Venus · 让算力自由连接', 'Venus · Connecting idle power')}</p><button className="flex items-center gap-2 pt-2 text-left sm:pt-0" onClick={() => { window.location.href = '/app/settings' }}><span className={cn('size-1.5 rounded-full', status?.database === 'connected' ? 'bg-primary' : 'bg-muted-foreground')} />{dbLabel}<ChevronRight className="size-3" /></button></footer>
     </div>
     <nav aria-label={t('移动端导航', 'Mobile navigation')} className="fixed inset-x-0 bottom-0 z-20 flex justify-around border-t bg-card pb-[env(safe-area-inset-bottom)] text-card-foreground xl:hidden">{navigation.slice(0, 5).map(item => <Link key={item.id} href={item.href} aria-current={section === item.id ? 'page' : undefined} className={cn('flex min-h-16 flex-1 flex-col items-center justify-center gap-1 text-sm', section === item.id ? 'bg-secondary/60 font-medium text-foreground' : 'text-muted-foreground')}><item.icon className="size-5" />{t(item.zh, item.en)}</Link>)}</nav>
     <WorkspaceDialogs /><Toaster theme="light" position="top-center" />
