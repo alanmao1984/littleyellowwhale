@@ -1,0 +1,97 @@
+name: Deploy ECS Primary
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecs-primary-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 24.16.0
+  PNPM_VERSION: 10.34.3
+  APP_DIR: /opt/littleyellowwhale
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm exec tsc --noEmit
+      - name: Verify production build
+        env:
+          DATABASE_URL: postgresql://127.0.0.1:5432/build
+          BETTER_AUTH_SECRET: build-only-secret-build-only-secret
+          BETTER_AUTH_URL: https://xiaohuangjing.com
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+          TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
+          NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+          BUILD_SHA: ${{ github.sha }}
+        run: pnpm build
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: ecs-primary
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure verified SSH access
+        env:
+          ECS_SSH_PRIVATE_KEY: ${{ secrets.ECS_SSH_PRIVATE_KEY }}
+          ECS_KNOWN_HOSTS: ${{ secrets.ECS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$ECS_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$ECS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+      - name: Upload immutable release
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_PORT: ${{ secrets.ECS_PORT }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          set -euo pipefail
+          release_dir="$APP_DIR/releases/$GITHUB_SHA"
+          ssh -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" "install -d -m 750 '$release_dir'"
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude '.next/' \
+            --exclude 'node_modules/' \
+            --exclude '.env*' \
+            -e "ssh -p $ECS_PORT" \
+            ./ "$ECS_USER@$ECS_HOST:$release_dir/"
+      - name: Activate healthy candidate
+        env:
+          ECS_HOST: ${{ secrets.ECS_HOST }}
+          ECS_PORT: ${{ secrets.ECS_PORT }}
+          ECS_USER: ${{ secrets.ECS_USER }}
+        run: |
+          set -euo pipefail
+          release_dir="$APP_DIR/releases/$GITHUB_SHA"
+          ssh -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" \
+            "APP_DIR='$APP_DIR' bash '$release_dir/scripts/deploy-ecs.sh' '$GITHUB_SHA' '$release_dir'"
+      - name: Verify public primary revision
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            response="$(curl --silent --show-error --fail --max-time 10 'https://xiaohuangjing.com/api/status' || true)"
+            if [[ "$response" == *'"status":"ready"'* && "$response" == *"\"revision\":\"$GITHUB_SHA\""* && "$response" == *'"role":"primary"'* ]]; then
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "The public primary endpoint did not report revision $GITHUB_SHA." >&2
+          exit 1

@@ -10,6 +10,30 @@ const googleClientId = process.env.GOOGLE_CLIENT_ID
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET
 const githubClientId = process.env.GITHUB_CLIENT_ID
 const githubClientSecret = process.env.GITHUB_CLIENT_SECRET
+
+function normalizeOrigin(value: string | undefined) {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : null
+  } catch {
+    return null
+  }
+}
+
+const authBaseURL =
+  process.env.BETTER_AUTH_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.V0_RUNTIME_URL)
+
+const configuredTrustedOrigins = (process.env.AUTH_TRUSTED_ORIGINS ?? '')
+  .split(',')
+  .map(origin => normalizeOrigin(origin.trim()))
+  .filter((origin): origin is string => Boolean(origin))
+
 const captchaConfig = resolveCaptchaConfig(process.env)
 export const authFormConfig = {
   captcha: { ready: captchaConfig.ready, siteKey: captchaConfig.siteKey, testing: captchaConfig.testing },
@@ -56,13 +80,7 @@ export const auth = betterAuth({
   hooks: { before: createAuthMiddleware(async ctx => {
     if (captchaProtectedPath(ctx.path) && !captchaConfig.ready) throw new APIError('SERVICE_UNAVAILABLE', { message: '认证暂不可用，请稍后再试。' })
   }) },
-  baseURL:
-    process.env.BETTER_AUTH_URL ??
-    (process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : process.env.V0_RUNTIME_URL),
+  baseURL: authBaseURL,
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,
@@ -80,6 +98,8 @@ export const auth = betterAuth({
       : []),
     ...(process.env.NODE_ENV === 'production'
       ? [
+          ...(normalizeOrigin(authBaseURL) ? [normalizeOrigin(authBaseURL)!] : []),
+          ...configuredTrustedOrigins,
           ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
           ...(process.env.VERCEL_PROJECT_PRODUCTION_URL
             ? [`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`]
@@ -95,6 +115,8 @@ export const auth = betterAuth({
   ...(process.env.NODE_ENV === 'development'
     ? {
         advanced: {
+          // Required by the cross-site v0 preview iframe. Without these
+          // attributes, login succeeds but the next request appears signed out.
           defaultCookieAttributes: {
             sameSite: 'none' as const,
             secure: true,

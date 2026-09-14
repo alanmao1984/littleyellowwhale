@@ -1,0 +1,15 @@
+.git
+.github
+.next
+node_modules
+.v0
+v0_memories
+v0_plans
+.env
+.env.*
+!.env.example
+npm-debug.log*
+pnpm-debug.log*
+coverage
+dist
+release
