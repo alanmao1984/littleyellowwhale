@@ -7,11 +7,18 @@ test('生产缺任一验证码配置或使用官方测试密钥均失败关闭',
   for (const env of [{}, { NEXT_PUBLIC_TURNSTILE_SITE_KEY: 'real-site' }, { TURNSTILE_SECRET_KEY: 'real-secret' }, { NEXT_PUBLIC_TURNSTILE_SITE_KEY: TEST_SITE_KEY, TURNSTILE_SECRET_KEY: TEST_SECRET_KEY }, { NEXT_PUBLIC_TURNSTILE_SITE_KEY: 'real-site', TURNSTILE_SECRET_KEY: TEST_SECRET_KEY }]) assert.equal(resolveCaptchaConfig({ ...env, NODE_ENV: 'production' }).ready, false)
   assert.equal(resolveCaptchaConfig({ NODE_ENV: 'production', NEXT_PUBLIC_TURNSTILE_SITE_KEY: 'real-site', TURNSTILE_SECRET_KEY: 'real-secret' }).ready, true)
 })
-test('开发只在完全未配置时成对使用官方测试键，真实配置不被替换', () => {
-  const config = resolveCaptchaConfig({ NODE_ENV: 'development' })
-  assert.equal(config.siteKey, TEST_SITE_KEY); assert.equal(config.secretKey, TEST_SECRET_KEY)
-  assert.equal(resolveCaptchaConfig({ NODE_ENV: 'development', NEXT_PUBLIC_TURNSTILE_SITE_KEY: 'only-one' }).ready, false)
-  assert.equal(resolveCaptchaConfig({ NODE_ENV: 'development', NEXT_PUBLIC_TURNSTILE_SITE_KEY: 'site', TURNSTILE_SECRET_KEY: 'secret' }).siteKey, 'site')
+test('开发环境始终成对使用官方测试键，避免临时预览域名被生产控件拒绝', () => {
+  for (const env of [
+    {},
+    { NEXT_PUBLIC_TURNSTILE_SITE_KEY: 'only-one' },
+    { NEXT_PUBLIC_TURNSTILE_SITE_KEY: 'real-site', TURNSTILE_SECRET_KEY: 'real-secret' },
+  ]) {
+    const config = resolveCaptchaConfig({ ...env, NODE_ENV: 'development' })
+    assert.equal(config.ready, true)
+    assert.equal(config.siteKey, TEST_SITE_KEY)
+    assert.equal(config.secretKey, TEST_SECRET_KEY)
+    assert.equal(config.testing, true)
+  }
 })
 test('敏感密码与 OTP 端点受保护，退出及会话读取不受配置故障影响', () => {
   for (const path of ['/sign-in/email', '/sign-up/email', '/sign-in/email-otp', '/email-otp/send-verification-otp', '/email-otp/verify-email', '/reset-password']) assert.equal(captchaProtectedPath(path), true)
