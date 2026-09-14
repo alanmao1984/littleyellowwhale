@@ -3,7 +3,11 @@ import { withWorkflow } from 'workflow/next'
 /** @type {import('next').NextConfig} */
 const dashboardSections = ['tasks', 'compute', 'text-market', 'video-market', 'market', 'organizations', 'nodes', 'earnings', 'developers', 'settings']
 
+const deploymentVersion = process.env.BUILD_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA
+
 const nextConfig = {
+  output: 'standalone',
+  ...(deploymentVersion ? { deploymentId: deploymentVersion } : {}),
   async redirects() {
     return [
       ...dashboardSections.map(section => ({ source: `/${section}`, destination: `/app/${section}`, permanent: true })),

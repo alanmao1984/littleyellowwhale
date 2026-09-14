@@ -4,7 +4,7 @@
 
 > 当前版本使用 **VTEST** 测试计价。VTEST 不可购买、提现、转账或兑换，不代表存款、货币、投资产品或收益承诺。
 
-[访问 Venus](https://venus-blond.vercel.app) · [进入控制台](https://venus-blond.vercel.app/tasks) · [查看下载与版本](https://github.com/alanmao1984/littleyellowwhale/releases)
+[访问 Venus](https://xiaohuangjing.com) · [进入控制台](https://xiaohuangjing.com/tasks) · [查看下载与版本](https://github.com/alanmao1984/littleyellowwhale/releases)
 
 ## 产品能力
 
@@ -22,11 +22,11 @@ Venus Node 是交互式前台节点，不安装常驻服务，不自动下载模
 
 | 平台 | 下载 | 文件名 |
 | --- | --- | --- |
-| Windows x64 | [下载安装程序](https://venus-blond.vercel.app/api/downloads/node/windows) | `venus-node-windows-x64-setup.exe` |
-| macOS Apple Silicon | [下载安装包](https://venus-blond.vercel.app/api/downloads/node/macos-arm64) | `venus-node-macos-arm64.pkg` |
-| macOS Intel | [下载安装包](https://venus-blond.vercel.app/api/downloads/node/macos-x64) | `venus-node-macos-x64.pkg` |
+| Windows x64 | [下载安装程序](https://xiaohuangjing.com/api/downloads/node/windows) | `venus-node-windows-x64-setup.exe` |
+| macOS Apple Silicon | [下载安装包](https://xiaohuangjing.com/api/downloads/node/macos-arm64) | `venus-node-macos-arm64.pkg` |
+| macOS Intel | [下载安装包](https://xiaohuangjing.com/api/downloads/node/macos-x64) | `venus-node-macos-x64.pkg` |
 
-- [查看安装包状态](https://venus-blond.vercel.app/api/downloads/node)
+- [查看安装包状态](https://xiaohuangjing.com/api/downloads/node)
 - [浏览全部 GitHub Releases](https://github.com/alanmao1984/littleyellowwhale/releases)
 - [下载最新源码 ZIP](https://github.com/alanmao1984/littleyellowwhale/archive/refs/heads/main.zip)
 
@@ -36,7 +36,7 @@ Venus Node 是交互式前台节点，不安装常驻服务，不自动下载模
 
 ### 1. 创建账户并进入工作台
 
-打开 [Venus 控制台](https://venus-blond.vercel.app/tasks)，注册或登录后进入任务中心。个人任务、节点、组织与账本数据均由服务端会话隔离。
+打开 [Venus 控制台](https://xiaohuangjing.com/tasks)，注册或登录后进入任务中心。个人任务、节点、组织与账本数据均由服务端会话隔离。
 
 ### 2. 准备本机能力
 
@@ -68,10 +68,10 @@ Venus Node 是交互式前台节点，不安装常驻服务，不自动下载模
 获取具备 `market:invoke` 权限的令牌后，可以先读取当前可用模型，再提交非流式请求：
 
 ```sh
-curl "https://venus-blond.vercel.app/api/v1/models" \
+curl "https://xiaohuangjing.com/api/v1/models" \
   -H "Authorization: Bearer $VENUS_API_TOKEN"
 
-curl "https://venus-blond.vercel.app/v1/chat/completions" \
+curl "https://xiaohuangjing.com/v1/chat/completions" \
   -H "Authorization: Bearer $VENUS_API_TOKEN" \
   -H "Content-Type: application/json" \
   -H "X-Request-Id: $(uuidgen)" \
@@ -122,6 +122,7 @@ Next.js 16、React 19、Neon PostgreSQL、Better Auth、Vercel Workflow、Vercel
 
 ## 进一步阅读
 
+- [ECS 主站与 Vercel 自动灾备运维手册](docs/ecs-vercel-disaster-recovery.md)
 - [Venus v2.2 开发说明](docs/venus-development-v2.2.md)
 - [Venus v2.1 开发与验收基线](docs/venus-development-v2.1.md)
 - [节点发布工作流](.github/workflows/release-node.yml)

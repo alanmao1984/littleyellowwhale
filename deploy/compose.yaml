@@ -1,0 +1,55 @@
+name: littleyellowwhale
+
+x-app: &app
+  restart: unless-stopped
+  env_file:
+    - /opt/littleyellowwhale/shared/.env.production
+  environment:
+    NODE_ENV: production
+    HOSTNAME: 0.0.0.0
+    PORT: 3000
+    DEPLOYMENT_ROLE: primary
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - >-
+        node -e "fetch('http://127.0.0.1:3000/api/status',{headers:{host:'xiaohuangjing.com'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+    interval: 15s
+    timeout: 5s
+    retries: 4
+    start_period: 20s
+  networks:
+    - application
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  blue:
+    <<: *app
+    image: ${BLUE_IMAGE:-littleyellowwhale:bootstrap}
+    container_name: littleyellowwhale-blue
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      DEPLOYMENT_ROLE: primary
+      BUILD_SHA: ${BLUE_SHA:-unknown}
+    ports:
+      - 127.0.0.1:3001:3000
+
+  green:
+    <<: *app
+    image: ${GREEN_IMAGE:-littleyellowwhale:bootstrap}
+    container_name: littleyellowwhale-green
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      DEPLOYMENT_ROLE: primary
+      BUILD_SHA: ${GREEN_SHA:-unknown}
+    ports:
+      - 127.0.0.1:3002:3000
+
+networks:
+  application:
+    driver: bridge
