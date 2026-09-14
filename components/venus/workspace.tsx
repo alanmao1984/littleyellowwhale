@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { LayoutDashboard, ListTodo, Cpu, Server, Wallet, Braces, Settings, Waves, ChevronRight, ArrowUpRight, BookOpen, Globe2, Bell, CircleHelp, UserRound, Menu, X, FileVideo2, Building2 } from 'lucide-react'
+import { LayoutDashboard, ListTodo, Cpu, Server, Wallet, Braces, Settings, Waves, ChevronRight, ArrowUpRight, BookOpen, Globe2, Bell, CircleHelp, UserRound, Menu, X, FileVideo2, Building2, Activity } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +13,7 @@ import { TasksPanel, ComputePanel, EarningsPanel } from './resource-panels'
 import { NodesPanel, DevelopersPanel, SettingsPanel } from './connection-panels'
 import { WorkspaceDialogs } from './workspace-dialogs'
 import { OrganizationComputePanel, TextMarketPanel, VideoMarketPanel } from './marketplace-panels'
+import { MarketActivityPanel } from './market-activity-panel'
 
 const navigation = [
   { id: 'overview', zh: '总览', en: 'Overview', icon: LayoutDashboard, href: '/' },
@@ -20,6 +21,7 @@ const navigation = [
   { id: 'compute', zh: '算力池', en: 'Compute pool', icon: Cpu, href: '/compute' },
   { id: 'text-market', zh: '文本 API 市场', en: 'Text API market', icon: Globe2, href: '/text-market' },
   { id: 'video-market', zh: '鲸联视频', en: 'Whale video', icon: FileVideo2, href: '/video-market' },
+  { id: 'market', zh: '市场动态', en: 'Market activity', icon: Activity, href: '/market' },
   { id: 'organizations', zh: '组织算力', en: 'Organization compute', icon: Building2, href: '/organizations' },
   { id: 'nodes', zh: '我的节点', en: 'My nodes', icon: Server, href: '/nodes' },
   { id: 'earnings', zh: '收益账本', en: 'Earnings', icon: Wallet, href: '/earnings' },
@@ -35,7 +37,7 @@ function WorkspaceShell({ section }: { section: Section }) {
   const { t, locale, setLocale, setModal, status, statusError, user } = useWorkspace()
   const [menuOpen, setMenuOpen] = useState(false)
   const active = navigation.find(item => item.id === section)!
-  const sectionPanels = { overview: <Overview />, tasks: <TasksPanel />, compute: <ComputePanel />, 'text-market': <TextMarketPanel />, 'video-market': <VideoMarketPanel />, organizations: <OrganizationComputePanel />, nodes: <NodesPanel />, earnings: <EarningsPanel />, developers: <DevelopersPanel />, settings: <SettingsPanel /> }
+  const sectionPanels = { overview: <Overview />, tasks: <TasksPanel />, compute: <ComputePanel />, 'text-market': <TextMarketPanel />, 'video-market': <VideoMarketPanel />, market: <MarketActivityPanel />, organizations: <OrganizationComputePanel />, nodes: <NodesPanel />, earnings: <EarningsPanel />, developers: <DevelopersPanel />, settings: <SettingsPanel /> }
   const dbLabel = statusError ? t('连接检测不可用', 'Check unavailable') : !status ? t('正在检查连接', 'Checking connection') : status.database === 'connected' ? t('数据库已连接', 'Database connected') : t('数据连接待就绪', 'Database pending')
   return <div className="min-h-dvh">
     <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-primary focus:p-3">{t('跳转到主要内容', 'Skip to content')}</a>

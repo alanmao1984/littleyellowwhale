@@ -412,3 +412,60 @@ export const transferToken = pgTable('transfer_tokens', {
   usedAt: timestamp('usedAt', { withTimezone: true }),
   createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// Platform-operator role, deliberately separate from organization membership so
+// no org-level owner/admin/operator/member can ever inherit platform powers. A
+// row is granted only by the one-time database script and stays as history when
+// revoked (status flips to 'revoked'); it is never physically deleted.
+export const platformRole = pgTable('platform_roles', {
+  id: text('id').primaryKey(),
+  userId: text('userId').notNull().unique(),
+  role: text('role').notNull(),
+  status: text('status').notNull().default('active'),
+  grantedBy: text('grantedBy').notNull(),
+  grantedReason: text('grantedReason').notNull(),
+  grantedAt: timestamp('grantedAt', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revokedAt', { withTimezone: true }),
+  updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// Immutable audit trail for platform-level actions: role grants and every
+// create/publish/edit/withdraw of operator content. `summary` holds a redacted
+// snapshot only — never prompts, outputs, tokens, or wallet balances.
+export const platformAuditEvent = pgTable('platform_audit_events', {
+  id: text('id').primaryKey(),
+  actorId: text('actorId').notNull(),
+  action: text('action').notNull(),
+  targetType: text('targetType').notNull(),
+  targetId: text('targetId'),
+  requestId: text('requestId'),
+  summary: jsonb('summary').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// Explicitly-labelled demonstration activity used only to backfill empty slots
+// on the public market feed. It carries public-safe fields only and never
+// fabricates real transaction IDs, user identities, or node identities; demo
+// rows must never touch wallets, ledgers, usage, or settlement statistics.
+export const marketDemoEvent = pgTable('market_demo_events', {
+  id: text('id').primaryKey(),
+  eventType: text('eventType').notNull().default('text_completion'),
+  titleZh: text('titleZh').notNull(),
+  titleEn: text('titleEn').notNull(),
+  summaryZh: text('summaryZh').notNull(),
+  summaryEn: text('summaryEn').notNull(),
+  model: text('model').notNull(),
+  inputTokens: integer('inputTokens').notNull().default(0),
+  outputTokens: integer('outputTokens').notNull().default(0),
+  settledAmount: numeric('settledAmount', { precision: 18, scale: 4 }).notNull().default('0'),
+  latencyMs: integer('latencyMs'),
+  currency: text('currency').notNull().default('VTEST'),
+  occurredAt: timestamp('occurredAt', { withTimezone: true }).notNull(),
+  status: text('status').notNull().default('draft'),
+  createdBy: text('createdBy').notNull(),
+  updatedBy: text('updatedBy').notNull(),
+  publishedAt: timestamp('publishedAt', { withTimezone: true }),
+  withdrawnAt: timestamp('withdrawnAt', { withTimezone: true }),
+  createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull().defaultNow(),
+})
