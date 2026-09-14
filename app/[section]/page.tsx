@@ -4,7 +4,7 @@ import { Workspace } from '@/components/venus/workspace'
 import type { Section } from '@/components/venus/workspace-context'
 import { getSessionUser } from '@/lib/venus/session'
 
-const sections = ['tasks', 'compute', 'text-market', 'video-market', 'organizations', 'nodes', 'earnings', 'developers', 'settings']
+const sections = ['tasks', 'compute', 'text-market', 'video-market', 'market', 'organizations', 'nodes', 'earnings', 'developers', 'settings']
 export default async function SectionPage({ params }: { params: Promise<{ section: string }> }) {
   const { section } = await params
   if (!sections.includes(section)) notFound()

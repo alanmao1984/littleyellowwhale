@@ -8,7 +8,8 @@
     "start": "next start",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "test:integration": "node --env-file-if-exists=.env.development.local --import tsx --test tests/*.integration.mts",
-    "node:bundle": "node scripts/build-node-sea.mjs"
+    "node:bundle": "node scripts/build-node-sea.mjs",
+    "grant:platform-admin": "node --env-file-if-exists=.env.development.local scripts/grant-platform-admin.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
