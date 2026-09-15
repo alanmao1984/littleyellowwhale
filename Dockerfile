@@ -1,8 +1,14 @@
 # syntax=docker/dockerfile:1.7
 
 FROM node:24.16.0-bookworm-slim AS base
+# 国内 ECS 访问 registry.npmjs.org 会超时（实测 12s 无响应），而 corepack 下载 pnpm
+# 和 pnpm install 都要走 registry，所以必须在 base 阶段就切换源，供后续阶段全部继承。
+# 需要时可用 --build-arg NPM_REGISTRY=... 覆盖。
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
+ENV COREPACK_NPM_REGISTRY=$NPM_REGISTRY
+ENV NPM_CONFIG_REGISTRY=$NPM_REGISTRY
 RUN corepack enable && corepack prepare pnpm@10.34.3 --activate
 WORKDIR /app
 

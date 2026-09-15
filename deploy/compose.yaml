@@ -4,6 +4,18 @@ x-app: &app
   restart: unless-stopped
   env_file:
     - /opt/littleyellowwhale/shared/.env.production
+  # 用户上传的媒体文件必须放在宿主机上，否则容器重建（每次 blue-green 发布都会重建）
+  # 就会连同可写层一起丢掉。
+  volumes:
+    - /opt/littleyellowwhale/shared/media:/app/.data/media
+  # 阿里云 ECS 出口到部分 Cloudflare anycast 网段（实测 104.16.0.0/13 全部超时）被黑洞，
+  # 而 challenges.cloudflare.com 的默认解析恰好落在被黑洞的网段上，导致 Turnstile 服务端
+  # 校验超时。better-auth 的 captcha 插件把 siteverify 地址硬编码在库内，无法用环境变量
+  # 覆盖，因此只能在容器 /etc/hosts 层面把域名指向一个实测可用的 anycast 节点。
+  # 节点由 scripts/deploy-ecs.sh 每次部署探测后通过 TURNSTILE_RESOLVE_IP 注入；
+  # 也可在 /opt/littleyellowwhale/shared/.env.production 里写死来手动指定。
+  extra_hosts:
+    - "challenges.cloudflare.com:${TURNSTILE_RESOLVE_IP:-172.64.80.1}"
   environment:
     NODE_ENV: production
     HOSTNAME: 0.0.0.0

@@ -49,6 +49,25 @@ actions_key="$(sed -n 's/^NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=//p' "$RUNTIME_ENV"
 [[ -n "$turnstile_site_key" ]] || { echo "NEXT_PUBLIC_TURNSTILE_SITE_KEY is required." >&2; exit 78; }
 [[ -n "$actions_key" ]] || { echo "NEXT_SERVER_ACTIONS_ENCRYPTION_KEY is required." >&2; exit 78; }
 
+# ECS 出口到部分 Cloudflare anycast 网段被黑洞，challenges.cloudflare.com 的默认解析会超时，
+# Turnstile 服务端校验（better-auth captcha 插件，地址硬编码）因此失败。每次部署探测一个
+# 可用节点注入容器 /etc/hosts；优先使用显式配置的 TURNSTILE_RESOLVE_IP。
+turnstile_resolve_ip() {
+  local preferred candidate
+  preferred="$(sed -n 's/^TURNSTILE_RESOLVE_IP=//p' "$RUNTIME_ENV" | tail -n 1)"
+  for candidate in ${preferred:+$preferred} 172.64.80.1 104.26.10.1 104.21.59.25 162.159.140.1 188.114.96.1; do
+    if curl --silent --show-error --max-time 5 -o /dev/null \
+        --resolve "challenges.cloudflare.com:443:$candidate" \
+        https://challenges.cloudflare.com/turnstile/v0/siteverify; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  printf '%s' "${preferred:-172.64.80.1}"
+}
+export TURNSTILE_RESOLVE_IP="$(turnstile_resolve_ip)"
+echo "Turnstile siteverify 出口节点: $TURNSTILE_RESOLVE_IP"
+
 actions_key_file="$(mktemp "$SHARED_DIR/actions-key.XXXXXX")"
 trap 'rm -f "$actions_key_file"' EXIT
 chmod 600 "$actions_key_file"
