@@ -51,8 +51,15 @@ const roadmap: { phase: string; title: CopyPair; body: CopyPair; state: CopyPair
 function Brand() {
   return (
     <span className="marketing-brand">
-      <span className="marketing-brand-mark" aria-hidden="true">◒</span>
-      <span><strong>LITTLE YELLOW WHALE</strong><small>VENUS COMPUTE PROTOCOL</small></span>
+      <Image
+        className="marketing-brand-mark"
+        src="/brand/venus-app-icon.png"
+        alt=""
+        width={40}
+        height={40}
+        priority
+      />
+      <span><strong>VENUS</strong><small>LITTLE YELLOW WHALE</small></span>
     </span>
   )
 }

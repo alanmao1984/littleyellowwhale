@@ -1,7 +1,8 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
-import { LayoutDashboard, ListTodo, Cpu, Server, Wallet, Braces, Settings, Waves, ChevronRight, ArrowUpRight, BookOpen, Globe2, Bell, CircleHelp, UserRound, Menu, X, FileVideo2, Building2, Activity } from 'lucide-react'
+import { LayoutDashboard, ListTodo, Cpu, Server, Wallet, Braces, Settings, ChevronRight, ArrowUpRight, BookOpen, Globe2, Bell, CircleHelp, UserRound, Menu, X, FileVideo2, Building2, Activity } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,7 +31,7 @@ const navigation = [
 ] as const
 
 function Brand() {
-  return <Link href="/" aria-label="小黄鲸 Venus" className="flex items-center gap-2.5"><span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground"><Waves className="size-7" strokeWidth={1.8} /></span><span className="flex flex-col"><span className="text-lg font-bold tracking-wide">小黄鲸<span className="ml-1.5 text-sm font-normal tracking-normal text-muted-foreground">Venus</span></span><span className="text-sm text-muted-foreground">分布式 AI 算力网络</span></span></Link>
+  return <Link href="/" aria-label="小黄鲸 Venus" className="flex items-center gap-2.5"><Image src="/brand/venus-app-icon.png" alt="" width={40} height={40} priority className="size-10 shrink-0 rounded-xl border object-cover" /><span className="flex flex-col"><span className="text-lg font-bold tracking-wide">Venus<span className="ml-1.5 text-sm font-normal tracking-normal text-muted-foreground">小黄鲸</span></span><span className="text-sm text-muted-foreground">分布式 AI 算力网络</span></span></Link>
 }
 
 function WorkspaceShell({ section }: { section: Section }) {
