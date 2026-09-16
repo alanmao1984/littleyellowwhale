@@ -21,6 +21,7 @@ env:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15          # 原缺省为 360min，卡住会白占并发锁
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,6 +45,7 @@ jobs:
   deploy:
     needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 20          # 原缺省为 360min，卡住会白占并发锁
     environment: ecs-primary
     steps:
       - uses: actions/checkout@v4
@@ -65,13 +67,13 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="$APP_DIR/releases/$GITHUB_SHA"
-          ssh -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" "install -d -m 750 '$release_dir'"
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" "install -d -m 750 '$release_dir'"
           rsync -az --delete \
             --exclude '.git/' \
             --exclude '.next/' \
             --exclude 'node_modules/' \
             --exclude '.env*' \
-            -e "ssh -p $ECS_PORT" \
+            -e "ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -p $ECS_PORT" \
             ./ "$ECS_USER@$ECS_HOST:$release_dir/"
       - name: Activate healthy candidate
         env:
@@ -81,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="$APP_DIR/releases/$GITHUB_SHA"
-          ssh -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" \
+          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" \
             "APP_DIR='$APP_DIR' bash '$release_dir/scripts/deploy-ecs.sh' '$GITHUB_SHA' '$release_dir'"
       - name: Verify public primary revision
         run: |
@@ -89,6 +91,7 @@ jobs:
           for attempt in $(seq 1 20); do
             response="$(curl --silent --show-error --fail --max-time 10 'https://xiaohuangjing.com/api/status' || true)"
             if [[ "$response" == *'"status":"ready"'* && "$response" == *"\"revision\":\"$GITHUB_SHA\""* && "$response" == *'"role":"primary"'* ]]; then
+              echo "公网校验通过（runner 侧，第 $attempt 次）：$response"
               exit 0
             fi
             sleep 6
