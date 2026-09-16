@@ -78,7 +78,7 @@ export function TaskResultsDialog({ taskId }: { taskId: string }) {
   const decisionLabel = (value: string | null) => value === 'accepted' ? t('已接受', 'Accepted') : value === 'rejected' ? t('已拒收', 'Rejected') : value === 'cancelled' ? t('未派发已取消', 'Cancelled before dispatch') : t('待核验', 'Unreviewed')
   return <>
     <Button size="sm" variant="outline" onClick={() => { setConfirmation(null); setOpen(true) }}><FileText data-icon="inline-start" />{t('进度与结果', 'Progress & results')}</Button>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{t('任务进度与结果', 'Task progress & results')}</DialogTitle><DialogDescription>{t('节点输出不是独立质量证明。逐条接受或拒收，再整单确认测试预算处置；仅支持同一所有者的自有节点。', 'Node output is not independent proof of quality. Review records, then finalize the test budget. Only same-owner nodes are supported.')}</DialogDescription></DialogHeader>
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl"><DialogHeader><DialogTitle>{t('任务进度与结果', 'Task progress & results')}</DialogTitle><DialogDescription>{t('用量哈希与节点签名可证明该运行时回传了这组输入、输出与 token 计数；内容质量仍需逐条接受或拒收，再完成整单处置。', 'Usage hashes and the node signature attest to the reported input, output and token counts. Content quality still requires your review before finalization.')}</DialogDescription></DialogHeader>
       {isLoading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />{t('读取中…', 'Loading…')}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{t('无法读取结果，请稍后再试。', 'Could not load results. Please retry.')}</p>}
       {data && <>
@@ -98,7 +98,7 @@ export function TaskResultsDialog({ taskId }: { taskId: string }) {
           {item.output !== null && <div className="mt-3 border-t pt-3"><p className="pb-1 text-sm font-medium">{t('节点输出', 'Node output')}</p><p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{item.output}</p></div>}
           {item.resultMeta && <details className="pt-2 text-sm"><summary className="cursor-pointer text-muted-foreground">{t('媒体文件元数据', 'Media metadata')}</summary><pre className="overflow-auto pt-2 text-sm">{JSON.stringify(item.resultMeta, null, 2)}</pre></details>}
           {item.errorCode && <p className="pt-2 text-sm text-muted-foreground">{errors[item.errorCode] ? t(...errors[item.errorCode]) : t('执行结果不确定', 'Uncertain execution')}</p>}
-          {item.usage && <p className="pt-2 font-mono text-sm text-muted-foreground">{t('节点上报', 'Node-reported')} token: {item.usage.inputTokens} / {item.usage.outputTokens}</p>}
+          {item.usage && <div className="flex flex-wrap items-center gap-2 pt-2"><p className="font-mono text-sm text-muted-foreground">token: {item.usage.inputTokens} / {item.usage.outputTokens}</p><Badge variant={item.usageVerified ? 'secondary' : 'outline'}>{item.usageVerified ? t('签名用量已核验', 'Signed usage verified') : t('用量未核验', 'Usage unverified')}</Badge>{item.usageAuditHash && <code className="max-w-40 truncate font-mono text-sm text-muted-foreground" title={item.usageAuditHash}>{item.usageAuditHash}</code>}</div>}
           <p className="py-2 text-sm text-muted-foreground">{item.billingUnits} {t('计费单位', 'billing units')}{item.reviewReason && ` · ${item.reviewReason}`}</p>
           {data.settlement === 'unverified' && item.status === 'review' && !item.reviewDecision && <ReviewControls taskId={taskId} item={item} onChanged={() => refresh()} />}
         </li>)}</ol>

@@ -3,6 +3,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { z } from 'zod'
 import { assignmentSchema, canExecute, resourcePolicySchema, type Assignment, type ResourcePolicy, type ResultInput } from '../../node-protocol/index.ts'
 import { adapterCapabilities, boundedJson, detectModels, executeMedia, infer, type AdapterConfig } from './adapters.ts'
+import { createAttestationIdentity } from './attestation.ts'
+import type { HardwareProfile, HermesStatus } from '../../node-protocol/index.ts'
 
 export function platformUrl(value: string) {
   const url = new URL(value)
@@ -22,8 +24,9 @@ export async function retryClaim(call: () => Promise<unknown>, stop: AbortSignal
     catch (error) { if (attempt >= 2) throw error; await delay(1000, undefined, { signal: stop }) }
   }
 }
-export type RuntimeConfig = { platform: string; token: string; adapter: AdapterConfig; allowedModels: string[]; maxConcurrency: number }
+export type RuntimeConfig = { platform: string; token: string; adapter: AdapterConfig; allowedModels: string[]; maxConcurrency: number; hardware: HardwareProfile; hermes: HermesStatus }
 export async function runNode(config: RuntimeConfig, stop: AbortSignal, report: (message: string) => void = console.log) {
+  const attestation = createAttestationIdentity()
   const jobs = new Map<string, { promise: Promise<void>; controller: AbortController }>()
   let policy: ResourcePolicy | null = null
   let available: string[] = []
@@ -60,6 +63,7 @@ export async function runNode(config: RuntimeConfig, stop: AbortSignal, report: 
     } finally {
       done = true; renewalStop.abort(); stop.removeEventListener('abort', onStop); await renewing
     }
+    result = { ...result, usageReceipt: attestation.signResult({ attemptId: work.attemptId, fence: work.fence, model: work.model, input: `${work.instruction}\n${work.input}`, output: result.output, usage: result.usage }) }
     // Retry only the identical result envelope, never the inference itself.
     for (let attempt = 0; attempt < 3; attempt++) {
       try { await call('/api/node/result', result); report('执行记录已回传，等待核验。'); return }
@@ -72,7 +76,11 @@ export async function runNode(config: RuntimeConfig, stop: AbortSignal, report: 
       try {
         if (Date.now() - heartbeatAt >= 15000) {
           available = (await detectModels(config.adapter)).filter(m => config.allowedModels.includes(m)).slice(0, 32)
-          const heartbeat = z.object({ status: z.string(), policy: resourcePolicySchema }).parse(await call('/api/node/heartbeat', { models: available, capabilities: adapterCapabilities(config.adapter) }))
+          if (config.hermes.enabled && config.hermes.proxyPort) {
+            try { const response = await fetch(`http://127.0.0.1:${config.hermes.proxyPort}/`, { redirect: 'manual', signal: AbortSignal.timeout(2500) }); config.hermes = { ...config.hermes, status: response.status > 0 ? 'healthy' : 'unreachable' } }
+            catch { config.hermes = { ...config.hermes, status: 'unreachable' } }
+          }
+          const heartbeat = z.object({ status: z.string(), policy: resourcePolicySchema }).parse(await call('/api/node/heartbeat', { models: available, capabilities: adapterCapabilities(config.adapter), hardware: config.hardware, hermes: config.hermes, attestationPublicKey: attestation.publicKey }))
           policy = heartbeat.policy; accepting = heartbeat.status === 'enrolled'; heartbeatAt = Date.now()
           for (const job of jobs.values()) if (!accepting || !policy.enabled) job.controller.abort()
         }

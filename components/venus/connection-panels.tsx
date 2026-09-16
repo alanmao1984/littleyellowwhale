@@ -102,6 +102,25 @@ function EnrollmentFlow({ onCreated }: { onCreated: () => void }) {
   )
 }
 
+function HermesAccessButton({ node }: { node: NodeView }) {
+  const { t } = useWorkspace()
+  const [pending, setPending] = useState(false)
+  async function authorize() {
+    setPending(true)
+    try {
+      const response = await fetch(`/api/v1/nodes/${node.id}/hermes-grant`, { method: 'POST' })
+      if (!response.ok) throw new Error('grant_failed')
+      const grant = await response.json() as { code: string }
+      const url = `http://127.0.0.1:${node.hermes?.proxyPort ?? 9120}/login?grant=${encodeURIComponent(grant.code)}`
+      await navigator.clipboard.writeText(url)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      toast.success(t('一次性 Hermes 授权链接已复制，并在新窗口打开。', 'One-time Hermes access link copied and opened in a new window.'))
+    } catch { toast.error(t('无法生成 Hermes 授权，请确认节点属于当前账户。', 'Could not create Hermes access. Confirm this node belongs to your account.')) }
+    finally { setPending(false) }
+  }
+  return <Button variant="outline" size="sm" onClick={authorize} disabled={pending || !node.online}><KeyRound data-icon="inline-start" />{t('打开 Hermes', 'Open Hermes')}</Button>
+}
+
 function NodeRow({ node, onChanged }: { node: NodeView; onChanged: () => void }) {
   const { t, locale } = useWorkspace()
   const [pending, setPending] = useState(false)
@@ -123,16 +142,20 @@ function NodeRow({ node, onChanged }: { node: NodeView; onChanged: () => void })
           <span className="font-medium">{node.name}</span>
           <Badge variant="outline">{node.platform === 'windows' ? 'Windows' : 'macOS'}</Badge>
           <Badge variant={node.status === 'revoked' ? 'secondary' : 'outline'}>{node.status === 'revoked' ? t('已撤销', 'Revoked') : node.status === 'paused' ? t('已暂停', 'Paused') : online ? t('在线', 'Online') : t('离线', 'Offline')}</Badge>
+          {node.hardware && <Badge variant="secondary">{node.hardware.tier}</Badge>}
+          {node.hermes?.enabled && <Badge variant="outline">Hermes · {node.hermes.status === 'healthy' ? t('就绪', 'Ready') : t('已启用', 'Enabled')}</Badge>}
         </div>
         <p className="pt-2 text-sm text-muted-foreground">
           {node.lastSeenAt ? t(`最近心跳 ${new Date(node.lastSeenAt).toLocaleString('zh-CN')}`, `Last heartbeat ${new Date(node.lastSeenAt).toLocaleString('en-US')}`) : t('尚未收到心跳', 'No heartbeat yet')}
           {node.models.length > 0 && ` · ${node.models.slice(0, 3).join(', ')}`}
           {node.cpu && ` · CPU ${node.cpu}%`}
           {typeof node.vram === 'number' && ` · VRAM ${node.vram}MB`}
+          {node.hardware && ` · ${node.hardware.cpuCores} 核 / ${(node.hardware.memoryBytes / 1024 ** 3).toFixed(1)} GiB`}
         </p>
       </div>
       {node.status !== 'revoked' && (
         <div className="flex shrink-0 flex-wrap gap-2">
+          {node.hermes?.enabled && <HermesAccessButton node={node} />}
           <NodePolicyForm node={node} onChanged={onChanged} />
           {node.status === 'paused'
             ? <Button variant="outline" size="sm" onClick={() => apply('enrolled')} disabled={pending}><Play data-icon="inline-start" />{t('恢复', 'Resume')}</Button>

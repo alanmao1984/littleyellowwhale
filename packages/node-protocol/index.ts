@@ -42,11 +42,27 @@ export function withinSchedule(policy: ResourcePolicy, now = new Date()): boolea
 export function canExecute(policy: ResourcePolicy, model: string, now = new Date()): boolean {
   return policy.allowedModels.includes(model) && withinSchedule(policy, now)
 }
+export const hardwareTierSchema = z.enum(['T0', 'T1', 'T2', 'T3', 'T4', 'ARC', 'ARC_LITE', 'SH_COMPACT', 'SH_LARGE', 'NV_ULTRA'])
+export const hardwareSchema = z.object({
+  platform: z.enum(['win32', 'darwin', 'linux']),
+  arch: z.enum(['x64', 'arm64']),
+  cpuModel: z.string().trim().min(1).max(200),
+  cpuCores: z.number().int().positive().max(1024),
+  memoryBytes: z.number().int().positive(),
+  gpu: z.object({ vendor: z.enum(['nvidia', 'amd', 'intel', 'apple', 'unknown']), model: z.string().trim().min(1).max(240), vramMiB: z.number().int().nonnegative().max(1_000_000).nullable() }).strict().nullable(),
+  tier: hardwareTierSchema,
+}).strict()
+export type HardwareProfile = z.infer<typeof hardwareSchema>
+export const hermesStatusSchema = z.object({ enabled: z.boolean(), status: z.enum(['disabled', 'starting', 'healthy', 'unreachable']), proxyPort: z.number().int().min(1024).max(65535).nullable(), internalPort: z.literal(9119), version: z.string().max(80).nullable() }).strict()
+export type HermesStatus = z.infer<typeof hermesStatusSchema>
 export const heartbeatSchema = z.object({
   capabilities: z.array(capabilitySchema).max(4).default(['text:infer']),
   cpu: z.number().min(0).max(100).nullable().optional(),
   vram: z.number().int().min(0).max(10_000_000).nullable().optional(),
   models: z.array(modelSchema).max(32).nullable().optional(),
+  hardware: hardwareSchema.optional(),
+  hermes: hermesStatusSchema.optional(),
+  attestationPublicKey: z.string().max(4096).regex(/^-----BEGIN PUBLIC KEY-----/).optional(),
 }).strict()
 export const claimSchema = z.object({ requestId: z.string().uuid() }).strict()
 export const leaseSchema = z.object({ attemptId: z.string().uuid(), fence: z.number().int().positive() }).strict()
@@ -85,11 +101,22 @@ export const remotePrivateVideoItemSchema = z.object({
   byteSize: z.number().int().positive().max(250 * 1024 * 1024),
 }).strict()
 
+export const usageSchema = z.object({ inputTokens: z.number().int().min(0).max(10_000_000), outputTokens: z.number().int().min(0).max(8192) }).strict()
+export const usageReceiptSchema = z.object({
+  inputHash: z.string().regex(/^[a-f0-9]{64}$/),
+  outputHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  eventHash: z.string().regex(/^[a-f0-9]{64}$/),
+  signature: z.string().min(40).max(1000),
+}).strict()
+export function usageEventPayload(value: { attemptId: string; fence: number; model: string; inputHash: string; outputHash: string | null; usage: z.infer<typeof usageSchema> | null }) {
+  return JSON.stringify({ attemptId: value.attemptId, fence: value.fence, model: value.model, inputHash: value.inputHash, outputHash: value.outputHash, usage: value.usage })
+}
 export const resultSchema = leaseSchema.extend({
   outcome: z.enum(['completed', 'uncertain']), model: modelSchema,
   output: z.string().max(32000).optional(),
   resultMeta: z.record(z.string(), z.unknown()).optional(),
-  usage: z.object({ inputTokens: z.number().int().min(0).max(10_000_000), outputTokens: z.number().int().min(0).max(8192) }).strict().nullable().optional(),
+  usage: usageSchema.nullable().optional(),
+  usageReceipt: usageReceiptSchema.optional(),
   errorCode: z.enum(['inference_error', 'cancel_requested', 'policy_changed', 'lease_lost', 'shutdown', 'media_error']).optional(),
 }).strict().refine(value => value.outcome !== 'completed' || (typeof value.output === 'string' && value.output.trim().length > 0))
 export type ResultInput = z.infer<typeof resultSchema>

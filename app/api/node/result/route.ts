@@ -10,6 +10,6 @@ export async function POST(request: Request) {
   const parsed = resultSchema.safeParse(await readLimitedJson(request).catch(() => null))
   if (!parsed.success) return nodeResponse({ error: 'invalid_request' }, 400)
   const result = await completeAttempt(principal, parsed.data)
-  if (result.ok && parsed.data.outcome === 'completed') await recordMarketUsage(parsed.data.attemptId)
+  if (result.ok && 'usageVerified' in result && result.usageVerified && parsed.data.outcome === 'completed') await recordMarketUsage(parsed.data.attemptId)
   return nodeResponse(result, result.ok ? 200 : 409)
 }

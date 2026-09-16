@@ -100,6 +100,8 @@ export const taskItem = pgTable('task_item', {
   result: text('result'),
   resultMeta: jsonb('resultMeta').$type<Record<string, unknown> | null>(),
   usage: jsonb('usage').$type<{ inputTokens: number; outputTokens: number } | null>(),
+  usageVerified: boolean('usageVerified').notNull().default(false),
+  usageAuditHash: text('usageAuditHash'),
   errorCode: text('errorCode'),
   resultHash: text('resultHash'),
   watcherRunId: text('watcherRunId'),
@@ -183,7 +185,21 @@ export const nodeHeartbeat = pgTable('node_heartbeat', {
   vram: integer('vram'),
   models: jsonb('models').$type<string[]>(),
   capabilities: jsonb('capabilities').$type<import('../../packages/node-protocol').Capability[]>().notNull().default(['text:infer']),
+  hardware: jsonb('hardware').$type<import('../../packages/node-protocol').HardwareProfile>(),
+  hermes: jsonb('hermes').$type<import('../../packages/node-protocol').HermesStatus>(),
+  attestationPublicKey: text('attestationPublicKey'),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+})
+
+export const nodeUsageEvent = pgTable('node_usage_events', {
+  id: text('id').primaryKey(), attemptId: text('attemptId').notNull().unique(), nodeId: text('nodeId').notNull(), userId: text('userId').notNull(), taskId: text('taskId').notNull(),
+  eventHash: text('eventHash').notNull(), inputHash: text('inputHash').notNull(), outputHash: text('outputHash'), usage: jsonb('usage').$type<{ inputTokens: number; outputTokens: number } | null>(), signature: text('signature'),
+  verified: boolean('verified').notNull().default(false), reason: text('reason'), createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const hermesAccessGrant = pgTable('hermes_access_grants', {
+  id: text('id').primaryKey(), nodeId: text('nodeId').notNull(), userId: text('userId').notNull(), codeHash: text('codeHash').notNull().unique(),
+  expiresAt: timestamp('expiresAt', { withTimezone: true }).notNull(), consumedAt: timestamp('consumedAt', { withTimezone: true }), createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const taskSettlement = pgTable('task_settlement', {

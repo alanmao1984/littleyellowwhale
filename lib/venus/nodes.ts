@@ -20,6 +20,8 @@ export type NodeView = {
   vram: number | null
   models: string[]
   capabilities: import('@/packages/node-protocol').Capability[]
+  hardware: import('@/packages/node-protocol').HardwareProfile | null
+  hermes: import('@/packages/node-protocol').HermesStatus | null
   policy: ResourcePolicy
   createdAt: string
 }
@@ -88,7 +90,7 @@ export async function resolveNodeToken(token: string): Promise<{ nodeId: string;
   return { nodeId: identity.nodeId, userId: identity.userId }
 }
 
-export type HeartbeatInput = { cpu?: number | null; vram?: number | null; models?: string[] | null; capabilities?: import('@/packages/node-protocol').Capability[] }
+export type HeartbeatInput = { cpu?: number | null; vram?: number | null; models?: string[] | null; capabilities?: import('@/packages/node-protocol').Capability[]; hardware?: import('@/packages/node-protocol').HardwareProfile; hermes?: import('@/packages/node-protocol').HermesStatus; attestationPublicKey?: string }
 
 export async function recordHeartbeat(nodeId: string, userId: string, input: HeartbeatInput) {
   const parsed = heartbeatSchema.parse(input)
@@ -96,7 +98,7 @@ export async function recordHeartbeat(nodeId: string, userId: string, input: Hea
     const [n] = await tx.select().from(node).where(and(eq(node.id, nodeId), eq(node.userId, userId))).for('update').limit(1)
     if (!n || n.status === 'revoked') return { status: 'revoked', policy: readPolicy(null) }
     const now = new Date()
-    const telemetry = { lastSeenAt: now, cpu: parsed.cpu?.toFixed(2) ?? null, vram: parsed.vram ?? null, models: parsed.models ?? [], capabilities: parsed.capabilities, updatedAt: now }
+    const telemetry = { lastSeenAt: now, cpu: parsed.cpu?.toFixed(2) ?? null, vram: parsed.vram ?? null, models: parsed.models ?? [], capabilities: parsed.capabilities, hardware: parsed.hardware ?? null, hermes: parsed.hermes ?? null, attestationPublicKey: parsed.attestationPublicKey ?? null, updatedAt: now }
     await tx.insert(nodeHeartbeat).values({ id: randomUUID(), nodeId, userId, ...telemetry })
       .onConflictDoUpdate({ target: nodeHeartbeat.nodeId, set: telemetry })
     return { status: n.status, policy: readPolicy(n.resourcePolicy) }
@@ -129,6 +131,8 @@ export async function listNodes(userId: string): Promise<NodeView[]> {
       vram: nodeHeartbeat.vram,
       models: nodeHeartbeat.models,
       capabilities: nodeHeartbeat.capabilities,
+      hardware: nodeHeartbeat.hardware,
+      hermes: nodeHeartbeat.hermes,
       policy: node.resourcePolicy,
     })
     .from(node)
@@ -148,6 +152,8 @@ export async function listNodes(userId: string): Promise<NodeView[]> {
     vram: row.vram ?? null,
     models: row.models ?? [],
     capabilities: row.capabilities ?? ['text:infer'],
+    hardware: row.hardware ?? null,
+    hermes: row.hermes ?? null,
     policy: readPolicy(row.policy),
     createdAt: row.createdAt.toISOString(),
   }))
