@@ -17,9 +17,7 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
-ARG BUILD_SHA=unknown
 ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY
-ENV BUILD_SHA=$BUILD_SHA
 ENV NEXT_PUBLIC_TURNSTILE_SITE_KEY=$NEXT_PUBLIC_TURNSTILE_SITE_KEY
 ENV DATABASE_URL=postgresql://127.0.0.1:5432/build
 ENV BETTER_AUTH_SECRET=build-only-secret-build-only-secret
@@ -43,4 +41,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 USER nextjs
 EXPOSE 3000
+
+# BUILD_SHA 只在**运行期**被读取（app/api/status/route.ts 用 process.env.BUILD_SHA，
+# deploy/compose.yaml 又会用 ${BLUE_SHA}/${GREEN_SHA} 注入），构建期并不需要它。
+# 之前它被声明在 builder 段、且 ENV 在 RUN pnpm build 之前，导致每换一个 SHA 就让
+# 那层 12 分钟的构建缓存全部失效；这台 4GB 实例曾因此在构建中 OOM 假死。
+# 现在放到镜像最后一层：SHA 变化只影响这一层元数据，pnpm build 层可以跨提交复用。
+ARG BUILD_SHA=unknown
+ENV BUILD_SHA=$BUILD_SHA
+
 CMD ["node", "server.js"]

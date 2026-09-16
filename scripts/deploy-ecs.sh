@@ -73,6 +73,22 @@ trap 'rm -f "$actions_key_file"' EXIT
 chmod 600 "$actions_key_file"
 printf '%s' "$actions_key" > "$actions_key_file"
 
+# 构建前腾内存：这台 4GB 实例曾因 docker build 耗尽内存触发 OOM，把系统拖到
+# 假死（SSH 与云助手两条救援通道同时失联，最后只能重启实例）。先回收 page cache，
+# 再等可用内存到位（构建峰值通常需要 1GB+ 余量），避免把同机的其他站点拖下水。
+sync
+if [[ -w /proc/sys/vm/drop_caches ]]; then
+  echo 1 > /proc/sys/vm/drop_caches 2>/dev/null || true
+fi
+avail_mb="$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)"
+for attempt in $(seq 1 30); do
+  if [[ "${avail_mb:-0}" -ge 1200 ]]; then break; fi
+  echo "可用内存仅 ${avail_mb}MB，等待其他任务让出内存（$attempt/30）"
+  sleep 10
+  avail_mb="$(awk '/^MemAvailable:/{print int($2/1024)}' /proc/meminfo)"
+done
+echo "构建前可用内存: ${avail_mb}MB"
+
 echo "Building revision $SHA for the $target_slot slot."
 docker build \
   --secret "id=next_server_actions_encryption_key,src=$actions_key_file" \
