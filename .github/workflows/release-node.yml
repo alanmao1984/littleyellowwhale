@@ -311,9 +311,17 @@ jobs:
             exit 1
           fi
           cat > "$RUNNER_TEMP/release-notes.md" <<EOF
-          Venus Node $VERSION 提供 Windows x64、macOS Apple Silicon 与 macOS Intel 安装包。
+          Venus Node $VERSION 提供 Windows x64、macOS Apple Silicon 与 macOS Intel 正式签名安装包。
 
-          节点仅以前台交互方式运行：不会安装常驻服务、自动下载模型或修改防火墙。首次启动仍需用户确认本机能力、资源边界并输入一次性配对码。请使用随附 SHA256SUMS 核验下载文件。
+          节点仅以前台交互方式运行：不会安装常驻服务、自动下载模型或修改防火墙。首次启动仍需用户确认本机能力、资源边界并输入一次性配对码。公开仓库不包含接单核心源码，外部源码构建不会生成或执行闭源核心。请使用随附 SHA256SUMS 核验下载文件。
+
+          中文使用说明：https://github.com/${{ github.repository }}/blob/$GITHUB_SHA/docs/venus-node-user-guide.zh-CN.md
+
+          Venus Node $VERSION includes production-signed installers for Windows x64, macOS Apple Silicon, and macOS Intel.
+
+          The node runs interactively in the foreground. It does not install a background service, download models automatically, or modify your firewall. On first launch, approve local capabilities and resource limits, then enter a one-time pairing code. The public repository excludes the task-execution core; external source builds neither produce nor run that closed-source core. Verify downloads with the included SHA256SUMS file.
+
+          English user guide: https://github.com/${{ github.repository }}/blob/$GITHUB_SHA/docs/venus-node-user-guide.en-US.md
           EOF
           FLAGS=(--target "$GITHUB_SHA" --title "Venus Node v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md")
           if [[ "$CHANNEL" == draft ]]; then

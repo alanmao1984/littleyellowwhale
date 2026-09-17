@@ -32,9 +32,11 @@ Venus Node 是交互式前台节点，不安装常驻服务，不自动下载模
 | macOS Apple Silicon | [下载安装包](https://xiaohuangjing.com/api/downloads/node/macos-arm64) | `venus-node-macos-arm64.pkg` |
 | macOS Intel | [下载安装包](https://xiaohuangjing.com/api/downloads/node/macos-x64) | `venus-node-macos-x64.pkg` |
 
+- [中文用户使用说明](docs/venus-node-user-guide.zh-CN.md)
+- [English User Guide](docs/venus-node-user-guide.en-US.md)
 - [查看安装包状态](https://xiaohuangjing.com/api/downloads/node)
 - [浏览全部 GitHub Releases](https://github.com/alanmao1984/littleyellowwhale/releases)
-- [下载最新源码 ZIP](https://github.com/alanmao1984/littleyellowwhale/archive/refs/heads/main.zip)
+- [下载最新公开源码 ZIP](https://github.com/alanmao1984/littleyellowwhale/archive/refs/heads/main.zip)（不包含客户端闭源接单核心，不能据此构建可运行核心）
 
 安装后请使用 Release 中的 `SHA256SUMS` 校验文件。Windows 正式包应带代码签名；macOS 正式包应完成签名、公证和 stapling，无法满足签名策略的构建不会作为正式稳定版发布。
 
@@ -128,6 +130,8 @@ Next.js 16、React 19、Neon PostgreSQL、Better Auth、Vercel Workflow、Vercel
 
 ## 进一步阅读
 
+- [Venus Node 中文用户使用说明](docs/venus-node-user-guide.zh-CN.md)
+- [Venus Node User Guide (English)](docs/venus-node-user-guide.en-US.md)
 - [ECS 主站与 Vercel 自动灾备运维手册](docs/ecs-vercel-disaster-recovery.md)
 - [Venus v2.2 开发说明](docs/venus-development-v2.2.md)
 - [Venus v2.1 开发与验收基线](docs/venus-development-v2.1.md)
