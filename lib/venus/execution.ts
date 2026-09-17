@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, lte, isNull, or } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { node, nodeHeartbeat, task, taskItem, taskSettlement, wallet, ledgerEntry } from '@/lib/db/schema'
 import { addStr, gte, multiplyStr, subStr } from './money'
+import { auditUsage } from './usage-audit'
 import { canExecute, supportsWork, readPolicy, LEASE_MS, MAX_ATTEMPT_MS, type NodePrincipal, type ResultInput, type Assignment } from '@/packages/node-protocol'
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
@@ -107,18 +108,20 @@ export async function completeAttempt(p: NodePrincipal, input: ResultInput) {
     if (!found) return { ok: false as const, error: 'not_found' }
     const { tk, item, scope } = found
     if (item.fence !== input.fence || tk.model !== input.model) return { ok: false as const, error: 'lease_mismatch' }
-    if (item.resultHash) return item.resultHash === hash ? { ok: true as const, duplicate: true, status: 'review' } : { ok: false as const, error: 'result_conflict' }
+    if (item.resultHash) return item.resultHash === hash ? { ok: true as const, duplicate: true, status: 'review', usageVerified: item.usageVerified } : { ok: false as const, error: 'result_conflict' }
     if (item.status !== 'running' || !item.leaseExpiresAt || item.leaseExpiresAt.getTime() <= Date.now()) {
       await expireItems(tx, tk.userId, tk.id)
       return { ok: false as const, error: 'lease_lost' }
     }
     if (input.usage && input.usage.outputTokens > tk.maxOutputTokens) return { ok: false as const, error: 'usage_limit' }
-    // Node-reported output and usage are not proof of quality or honest metering.
-    // Persist for review; never mint earnings or automatically retry uncertain work.
+    const [heartbeat] = await tx.select({ publicKey: nodeHeartbeat.attestationPublicKey }).from(nodeHeartbeat).where(and(eq(nodeHeartbeat.nodeId, p.nodeId), eq(nodeHeartbeat.userId, p.userId))).limit(1)
+    const audit = await auditUsage(tx, { input, nodeId: p.nodeId, userId: p.userId, taskId: tk.id, expectedInput: `${tk.instruction}\n${item.text}`, publicKey: heartbeat?.publicKey ?? null })
+    // A verified signature proves the enrolled runtime signed this exact input,
+    // output and usage envelope. Quality still requires the user's review.
     await tx.update(taskItem).set({ status: 'review', result: input.outcome === 'completed' ? input.output : null,
-      usage: input.usage ?? null, resultMeta: input.resultMeta ?? null, resultHash: hash, errorCode: input.outcome === 'uncertain' ? (input.errorCode ?? 'inference_error') : null, finishedAt: new Date() }).where(scope)
+      usage: input.usage ?? null, usageVerified: audit.verified, usageAuditHash: audit.eventHash, resultMeta: input.resultMeta ?? null, resultHash: hash, errorCode: input.outcome === 'uncertain' ? (input.errorCode ?? 'inference_error') : null, finishedAt: new Date() }).where(scope)
     await updateSummary(tx, tk.userId, tk.id)
-    return { ok: true as const, duplicate: false, status: 'review' }
+    return { ok: true as const, duplicate: false, status: 'review', usageVerified: audit.verified }
   })
 }
 
@@ -171,7 +174,7 @@ export async function pendingWatchers(userId: string) {
 export async function getTaskResults(userId: string, taskId: string) {
   const [tk] = await db.select().from(task).where(scopedTask(userId, taskId)).limit(1)
   if (!tk) return null
-  const items = await db.select({ id: taskItem.id, index: taskItem.idx, status: taskItem.status, input: taskItem.text, output: taskItem.result, resultMeta: taskItem.resultMeta, billingUnits: taskItem.billingUnits, usage: taskItem.usage, errorCode: taskItem.errorCode, attemptId: taskItem.attemptId, fence: taskItem.fence, reviewDecision: taskItem.reviewDecision, reviewedBy: taskItem.reviewedBy, reviewedAt: taskItem.reviewedAt, reviewReason: taskItem.reviewReason }).from(taskItem).where(scopedItems(userId, taskId)).orderBy(asc(taskItem.idx))
+  const items = await db.select({ id: taskItem.id, index: taskItem.idx, status: taskItem.status, input: taskItem.text, output: taskItem.result, resultMeta: taskItem.resultMeta, billingUnits: taskItem.billingUnits, usage: taskItem.usage, usageVerified: taskItem.usageVerified, usageAuditHash: taskItem.usageAuditHash, errorCode: taskItem.errorCode, attemptId: taskItem.attemptId, fence: taskItem.fence, reviewDecision: taskItem.reviewDecision, reviewedBy: taskItem.reviewedBy, reviewedAt: taskItem.reviewedAt, reviewReason: taskItem.reviewReason }).from(taskItem).where(scopedItems(userId, taskId)).orderBy(asc(taskItem.idx))
   const [settlement] = await db.select({ acceptedAmount: taskSettlement.acceptedAmount, refundedAmount: taskSettlement.refundedAmount, providerAmount: taskSettlement.providerAmount, brokerAmount: taskSettlement.brokerAmount, platformAmount: taskSettlement.platformAmount, status: taskSettlement.status, releaseAt: taskSettlement.releaseAt, releasedAt: taskSettlement.releasedAt }).from(taskSettlement).where(and(eq(taskSettlement.userId, userId), eq(taskSettlement.taskId, taskId))).limit(1)
   return { taskId, taskType: tk.taskType, operation: tk.operation, model: tk.model, nodeName: tk.nodeName, status: tk.status, settlement: tk.settlementStatus, reservedAmount: tk.reservedAmount, items, settlementDetail: settlement ? { ...settlement, releaseAt: settlement.releaseAt.toISOString(), releasedAt: settlement.releasedAt?.toISOString() ?? null } : null }
 }

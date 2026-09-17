@@ -118,7 +118,7 @@ export async function listMarketActivity(userId: string) {
 
 export async function recordMarketUsage(attemptId: string) {
   const [row] = await db.select({ item: taskItem, request: apiRequest, offering: marketOffering }).from(taskItem).innerJoin(task, eq(task.id, taskItem.taskId)).innerJoin(apiRequest, eq(apiRequest.id, task.apiRequestId)).innerJoin(marketOffering, eq(marketOffering.id, task.offeringId)).where(eq(taskItem.attemptId, attemptId)).limit(1)
-  if (!row?.item.usage || !row.item.result) return
+  if (!row?.item.usageVerified || !row.item.usage || !row.item.result) return
   const inputAmount = multiplyStr(row.offering.inputUnitPrice, Math.ceil(row.item.usage.inputTokens / 1000))
   const outputAmount = multiplyStr(row.offering.outputUnitPrice, Math.ceil(row.item.usage.outputTokens / 1000))
   const settled = addStr(inputAmount, outputAmount)
