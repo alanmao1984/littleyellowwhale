@@ -21,7 +21,7 @@ env:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15          # 原缺省为 360min，卡住会白占并发锁
+    timeout-minutes: 15 # 原缺省为 360min，卡住会白占并发锁
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,7 +45,7 @@ jobs:
   deploy:
     needs: verify
     runs-on: ubuntu-latest
-    timeout-minutes: 20          # 原缺省为 360min，卡住会白占并发锁
+    timeout-minutes: 20 # 原缺省为 360min，卡住会白占并发锁
     environment: ecs-primary
     steps:
       - uses: actions/checkout@v4
@@ -67,14 +67,33 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="$APP_DIR/releases/$GITHUB_SHA"
-          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" "install -d -m 750 '$release_dir'"
-          rsync -az --delete \
-            --exclude '.git/' \
-            --exclude '.next/' \
-            --exclude 'node_modules/' \
-            --exclude '.env*' \
-            -e "ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -p $ECS_PORT" \
-            ./ "$ECS_USER@$ECS_HOST:$release_dir/"
+          ssh_options=(-o BatchMode=yes -o ConnectTimeout=60 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+          for attempt in $(seq 1 5); do
+            if ssh "${ssh_options[@]}" -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" "install -d -m 750 '$release_dir'"; then
+              break
+            fi
+            if [[ "$attempt" == 5 ]]; then
+              echo "ECS SSH preflight failed after $attempt attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          for attempt in $(seq 1 5); do
+            if rsync -az --delete \
+              --exclude '.git/' \
+              --exclude '.next/' \
+              --exclude 'node_modules/' \
+              --exclude '.env*' \
+              -e "ssh -o BatchMode=yes -o ConnectTimeout=60 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -p $ECS_PORT" \
+              ./ "$ECS_USER@$ECS_HOST:$release_dir/"; then
+              break
+            fi
+            if [[ "$attempt" == 5 ]]; then
+              echo "ECS release upload failed after $attempt attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
       - name: Activate healthy candidate
         env:
           ECS_HOST: ${{ secrets.ECS_HOST }}
@@ -83,8 +102,17 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="$APP_DIR/releases/$GITHUB_SHA"
-          ssh -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" \
-            "APP_DIR='$APP_DIR' bash '$release_dir/scripts/deploy-ecs.sh' '$GITHUB_SHA' '$release_dir'"
+          for attempt in $(seq 1 5); do
+            if ssh -o BatchMode=yes -o ConnectTimeout=60 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -p "$ECS_PORT" "$ECS_USER@$ECS_HOST" \
+              "APP_DIR='$APP_DIR' bash '$release_dir/scripts/deploy-ecs.sh' '$GITHUB_SHA' '$release_dir'"; then
+              exit 0
+            fi
+            if [[ "$attempt" == 5 ]]; then
+              echo "ECS candidate activation failed after $attempt attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
       - name: Verify public primary revision
         run: |
           set -euo pipefail
