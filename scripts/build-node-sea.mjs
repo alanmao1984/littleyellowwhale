@@ -10,6 +10,13 @@ import postject from 'postject'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const version = process.env.RELEASE_VERSION || '0.1.0-dev'
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('RELEASE_VERSION 必须是有效的语义版本。')
+const privateCoreInput = process.env.VENUS_NODE_CORE_ENTRY
+if (!privateCoreInput) throw new Error('公开仓库不包含客户端接单核心，外部构建已禁用。')
+const privateCoreEntry = resolve(privateCoreInput)
+const privateCoreManifest = JSON.parse(await readFile(join(dirname(dirname(privateCoreEntry)), 'package.json'), 'utf8'))
+if (privateCoreManifest.name !== '@alanmao1984/littleyellowwhale-ant-internal' || privateCoreManifest.version !== version) {
+  throw new Error('私有客户端核心包名称或版本与 Release 不一致。')
+}
 if (process.versions.node !== '24.16.0') throw new Error(`SEA 构建必须使用固定 Node.js 24.16.0，当前为 ${process.versions.node}。`)
 
 const platform = process.platform
@@ -27,7 +34,7 @@ const executablePath = resolve(process.env.SEA_OUTPUT || join(outputDirectory, `
 await rm(outputDirectory, { recursive: true, force: true })
 await mkdir(workDirectory, { recursive: true })
 await build({
-  entryPoints: [join(root, 'packages/venus-node/src/cli.ts')],
+  entryPoints: [privateCoreEntry],
   outfile: bundlePath,
   bundle: true,
   platform: 'node',

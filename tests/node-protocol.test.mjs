@@ -1,8 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { resourcePolicySchema, readPolicy, withinSchedule, canExecute, heartbeatSchema, resultSchema, DEFAULT_POLICY } from '../packages/node-protocol/index.ts'
-import { localServiceUrl } from '../packages/venus-node/src/adapters.ts'
-import { platformUrl } from '../packages/venus-node/src/runtime.ts'
 
 const policy = { ...DEFAULT_POLICY, enabled: true, allowedModels: ['qwen2.5:7b'], start: '22:00', end: '06:00' }
 test('新节点及损坏的策略默认拒绝接单', () => {
@@ -34,13 +32,4 @@ test('完整输出和受限计量才能进入结果协议', () => {
   assert.equal(resultSchema.safeParse({ ...base, output: 'done', usage: null }).success, true)
   assert.equal(resultSchema.safeParse({ ...base, output: 'x'.repeat(32001) }).success, false)
   assert.equal(resultSchema.safeParse({ ...base, output: 'done', usage: { inputTokens: -1, outputTokens: 1 } }).success, false)
-})
-test('本机推理目标拒绝云端、私网扩散、元数据和凭据 URL', () => {
-  for (const url of ['http://169.254.169.254/', 'http://192.168.1.1/', 'https://example.com/', 'http://user:pass@127.0.0.1/', 'http://127.0.0.1/?redirect=x']) assert.throws(() => localServiceUrl(url))
-  assert.equal(localServiceUrl('http://127.0.0.1:8000/v1/'), 'http://127.0.0.1:8000/v1')
-})
-test('平台需要 HTTPS，除非是回环测试', () => {
-  assert.throws(() => platformUrl('http://example.com'))
-  assert.throws(() => platformUrl('https://example.com/path'))
-  assert.equal(platformUrl('https://example.com'), 'https://example.com')
 })

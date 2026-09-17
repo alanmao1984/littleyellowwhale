@@ -48,7 +48,7 @@ export function NodeInstallerDownloads({ platform }: { platform: NodeOperatingSy
           ? <a key={choice.key} href={`/api/downloads/node/${choice.key}`} className={cn(buttonVariants(), 'w-full sm:w-auto')}><Download className="size-4" />{choice.label}</a>
           : <Button key={choice.key} disabled className="w-full sm:w-auto">{releaseLoading ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Download data-icon="inline-start" />}{choice.label}</Button>)}
       </div>
-      <p className="text-sm leading-relaxed text-muted-foreground">{t('浏览器只会开始下载。系统仍会要求你确认安装；程序不会注册后台服务、自动下载模型或修改防火墙。', 'The browser only starts the download. Your system still asks you to approve installation. The app does not register a background service, download models, or change your firewall.')}</p>
+      <p className="text-sm leading-relaxed text-muted-foreground">{t('安装包来自本项目 GitHub Release，公开仓库不包含接单核心源码。系统仍会要求你确认安装；程序不会注册后台服务、自动下载模型或修改防火墙。', 'Installers come from this project’s GitHub Releases; the public repository does not include the task execution core. Your system still asks you to approve installation, and the app does not register a background service, download models, or change your firewall.')}</p>
     </div>
   )
 }
