@@ -55,7 +55,7 @@ async function main() {
       models = await detectModels(adapter)
     }
     stdout.write(`已检测 ${models.length} 个可执行能力：${models.join(', ')}。\n`)
-    const allowedModels = installed ? models : z.array(modelSchema).min(1).max(32).parse((await io.question('允许的模型或能力名称（逗号分隔）：')).split(',').map(m => m.trim()))
+    const allowedModels = installed ? models : z.array(modelSchema).min(1).max(8).parse((await io.question('允许的模型或能力名称（逗号分隔）：')).split(',').map(m => m.trim()))
     if (allowedModels.some(model => !models.includes(model))) throw new Error('至少一个模型或能力未在本机检测到。')
     const maxConcurrency = z.coerce.number().int().min(1).max(8).parse(await io.question('本机并发上限（1–8）：'))
     if ((await io.question('默认仅允许文本。是否为本次会话开启媒体？输入 media 才开启：')).trim() === 'media') {

@@ -152,6 +152,8 @@ export const node = pgTable('node', {
   dispatchDomain: text('dispatchDomain').notNull().default('self'),
   visibility: text('visibility').notNull().default('private'),
   resourcePolicy: jsonb('resourcePolicy').$type<import('../../packages/node-protocol').ResourcePolicy>(),
+  maxConcurrentTasks: integer('maxConcurrentTasks').notNull().default(1),
+  pogwScore: integer('pogwScore').notNull().default(100),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
 })
 

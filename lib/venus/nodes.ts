@@ -23,6 +23,8 @@ export type NodeView = {
   hardware: import('@/packages/node-protocol').HardwareProfile | null
   hermes: import('@/packages/node-protocol').HermesStatus | null
   policy: ResourcePolicy
+  maxConcurrentTasks: number
+  pogwScore: number
   createdAt: string
 }
 
@@ -111,7 +113,7 @@ export async function saveNodePolicy(userId: string, nodeId: string, input: unkn
   return db.transaction(async tx => {
     const [n] = await tx.select().from(node).where(and(eq(node.id, nodeId), eq(node.userId, userId))).for('update').limit(1)
     if (!n || n.status === 'revoked') return { ok: false as const }
-    await tx.update(node).set({ resourcePolicy: parsed.data }).where(and(eq(node.id, nodeId), eq(node.userId, userId)))
+    await tx.update(node).set({ resourcePolicy: parsed.data, maxConcurrentTasks: parsed.data.maxConcurrency }).where(and(eq(node.id, nodeId), eq(node.userId, userId)))
     return { ok: true as const }
   })
 }
@@ -134,6 +136,8 @@ export async function listNodes(userId: string): Promise<NodeView[]> {
       hardware: nodeHeartbeat.hardware,
       hermes: nodeHeartbeat.hermes,
       policy: node.resourcePolicy,
+      maxConcurrentTasks: node.maxConcurrentTasks,
+      pogwScore: node.pogwScore,
     })
     .from(node)
     .leftJoin(nodeHeartbeat, eq(nodeHeartbeat.nodeId, node.id))
@@ -155,6 +159,8 @@ export async function listNodes(userId: string): Promise<NodeView[]> {
     hardware: row.hardware ?? null,
     hermes: row.hermes ?? null,
     policy: readPolicy(row.policy),
+    maxConcurrentTasks: row.maxConcurrentTasks,
+    pogwScore: row.pogwScore,
     createdAt: row.createdAt.toISOString(),
   }))
 }

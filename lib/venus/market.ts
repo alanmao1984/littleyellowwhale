@@ -7,6 +7,7 @@ import { ensureWallet } from './ledger'
 import { addStr, gte, multiplyStr, percentageStr, subStr } from './money'
 import { hashToken } from './tokens'
 import { cancelExecution } from './execution'
+import { publicDispatchOrder, rankWithAntInternal } from './ant-internal'
 
 const messageSchema = z.object({ role: z.enum(['system', 'user', 'assistant']), content: z.string().min(1).max(30_000) }).strict()
 export const chatCompletionSchema = z.object({
@@ -70,9 +71,14 @@ export async function submitMarketJob(principal: ApiPrincipal, requestId: string
   return db.transaction(async tx => {
     const [previous] = await tx.select().from(apiRequest).where(and(eq(apiRequest.apiTokenId, principal.tokenId), eq(apiRequest.requestId, requestId))).limit(1)
     if (previous) return { ok: true as const, duplicate: true, jobId: previous.id, taskId: previous.taskId!, status: previous.status, reserved: previous.reservedAmount }
-    const [offer] = await tx.select({ offering: marketOffering, nodeName: node.name, heartbeat: nodeHeartbeat.lastSeenAt }).from(marketOffering).innerJoin(node, eq(node.id, marketOffering.nodeId)).innerJoin(nodeHeartbeat, eq(nodeHeartbeat.nodeId, marketOffering.nodeId))
-      .where(and(eq(marketOffering.status, 'published'), eq(marketOffering.modelAlias, parsed.data.model), gt(nodeHeartbeat.lastSeenAt, new Date(Date.now() - 90_000)), principal.organizationId ? or(isNull(marketOffering.organizationId), eq(marketOffering.organizationId, principal.organizationId)) : isNull(marketOffering.organizationId))).orderBy(asc(marketOffering.inputUnitPrice), asc(marketOffering.createdAt)).for('update').limit(1)
+    const availableOffers = await tx.select({ offering: marketOffering, nodeName: node.name, heartbeat: nodeHeartbeat.lastSeenAt, pogwScore: node.pogwScore }).from(marketOffering).innerJoin(node, eq(node.id, marketOffering.nodeId)).innerJoin(nodeHeartbeat, eq(nodeHeartbeat.nodeId, marketOffering.nodeId))
+      .where(and(eq(marketOffering.status, 'published'), eq(marketOffering.modelAlias, parsed.data.model), gt(nodeHeartbeat.lastSeenAt, new Date(Date.now() - 90_000)), principal.organizationId ? or(isNull(marketOffering.organizationId), eq(marketOffering.organizationId, principal.organizationId)) : isNull(marketOffering.organizationId))).limit(50)
+    const publicRanked = publicDispatchOrder(availableOffers.map(candidate => ({ ...candidate, offeringId: candidate.offering.id, inputUnitPrice: candidate.offering.inputUnitPrice, createdAt: candidate.offering.createdAt })))
+    const internalOrder = await rankWithAntInternal(publicRanked)
+    const selectedId = internalOrder?.find(id => publicRanked.some(candidate => candidate.offeringId === id)) ?? publicRanked[0]?.offeringId
+    const offer = publicRanked.find(candidate => candidate.offeringId === selectedId)
     if (!offer) return { ok: false as const, status: 404, error: 'model_unavailable' as const }
+    await tx.select({ id: marketOffering.id }).from(marketOffering).where(eq(marketOffering.id, offer.offering.id)).for('update').limit(1)
     const inputTokens = estimateTokens(parsed.data.messages)
     if (inputTokens + parsed.data.max_tokens > offer.offering.contextLimit) return { ok: false as const, status: 400, error: 'context_length_exceeded' as const }
     const quote = addStr(multiplyStr(offer.offering.inputUnitPrice, Math.ceil(inputTokens / 1000)), multiplyStr(offer.offering.outputUnitPrice, Math.ceil(parsed.data.max_tokens / 1000)))

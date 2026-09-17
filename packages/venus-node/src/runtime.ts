@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { z } from 'zod'
-import { assignmentSchema, canExecute, resourcePolicySchema, type Assignment, type ResourcePolicy, type ResultInput } from '../../node-protocol/index.ts'
+import { assignmentSchema, batchClaimResultSchema, canExecute, resourcePolicySchema, type Assignment, type ResourcePolicy, type ResultInput } from '../../node-protocol/index.ts'
 import { adapterCapabilities, boundedJson, detectModels, executeMedia, infer, type AdapterConfig } from './adapters.ts'
 import { createAttestationIdentity } from './attestation.ts'
 import type { HardwareProfile, HermesStatus } from '../../node-protocol/index.ts'
@@ -20,7 +20,13 @@ export async function platformRequest(base: string, path: string, token: string 
 export async function retryClaim(call: () => Promise<unknown>, stop: AbortSignal) {
   for (let attempt = 0; ; attempt++) {
     stop.throwIfAborted()
-    try { return z.object({ assignment: assignmentSchema.nullable() }).parse(await call()) }
+    try {
+      const payload = await call()
+      const batch = batchClaimResultSchema.safeParse(payload)
+      if (batch.success) return batch.data
+      const legacy = z.object({ assignment: assignmentSchema.nullable() }).strict().parse(payload)
+      return { assignment: legacy.assignment, assignments: legacy.assignment ? [legacy.assignment] : [], reason: legacy.assignment ? 'accepted' : 'no_matching_task', retryAfterMs: legacy.assignment ? 0 : 3_000 }
+    }
     catch (error) { if (attempt >= 2) throw error; await delay(1000, undefined, { signal: stop }) }
   }
 }
@@ -84,17 +90,22 @@ export async function runNode(config: RuntimeConfig, stop: AbortSignal, report: 
           policy = heartbeat.policy; accepting = heartbeat.status === 'enrolled'; heartbeatAt = Date.now()
           for (const job of jobs.values()) if (!accepting || !policy.enabled) job.controller.abort()
         }
-        if (accepting && policy && jobs.size < Math.min(config.maxConcurrency, policy.maxConcurrency) && available.some(m => canExecute(policy!, m))) {
+        const capacity = policy ? Math.min(config.maxConcurrency, policy.maxConcurrency) - jobs.size : 0
+        if (accepting && policy && capacity > 0 && available.some(m => canExecute(policy!, m))) {
           const requestId = randomUUID()
-          const envelope = await retryClaim(() => call('/api/node/claim', { requestId }), stop)
-          if (envelope.assignment) {
-            const work = envelope.assignment
+          const envelope = await retryClaim(() => call('/api/node/claim', { requestId, limit: Math.min(32, capacity) }), stop)
+          for (const work of envelope.assignments) {
             if (jobs.has(work.attemptId)) continue
             const controller = new AbortController()
             const promise = execute(work, controller).finally(() => jobs.delete(work.attemptId))
             jobs.set(work.attemptId, { promise, controller })
+          }
+          if (envelope.assignments.length) {
+            report(`已唤醒并接收 ${envelope.assignments.length} 条执行记录。`)
             continue
           }
+          const jitter = Math.floor(Math.random() * Math.min(1000, envelope.retryAfterMs / 4))
+          await delay(envelope.retryAfterMs + jitter, undefined, { signal: stop }).catch(() => undefined)
         }
       } catch {
         accepting = false; heartbeatAt = 0

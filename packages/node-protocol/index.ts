@@ -64,7 +64,12 @@ export const heartbeatSchema = z.object({
   hermes: hermesStatusSchema.optional(),
   attestationPublicKey: z.string().max(4096).regex(/^-----BEGIN PUBLIC KEY-----/).optional(),
 }).strict()
-export const claimSchema = z.object({ requestId: z.string().uuid() }).strict()
+export const claimSchema = z.object({ requestId: z.string().uuid(), limit: z.number().int().min(1).max(32).default(1) }).strict()
+export const batchClaimResultSchema = z.object({
+  assignments: z.array(z.lazy(() => assignmentSchema)).max(32),
+  reason: z.string().min(1).max(80),
+  retryAfterMs: z.number().int().min(0).max(60_000),
+}).strict()
 export const leaseSchema = z.object({ attemptId: z.string().uuid(), fence: z.number().int().positive() }).strict()
 
 export const mediaSpecSchema = z.discriminatedUnion('taskType', [
